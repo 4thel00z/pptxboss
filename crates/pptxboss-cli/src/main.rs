@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use pptxboss_core::{Document, TextOptions};
 
 mod check;
+mod create;
 mod info;
 mod text;
 
@@ -15,7 +16,7 @@ mod text;
 #[command(
     name = "pptxboss",
     version,
-    about = "PresentationML (.pptx) toolkit: inspect, extract text and notes"
+    about = "PresentationML (.pptx) toolkit: inspect, extract text and notes, verify against ECMA-376, create decks"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -76,6 +77,9 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Create a deck: blank slides, one slide from arguments, or slides from Markdown.
+    #[command(subcommand)]
+    Create(create::Create),
 }
 
 /// A failure with the exit code it maps to: 1 for unreadable input, 2 for bad usage.
@@ -132,6 +136,7 @@ fn main() -> ExitCode {
             no_crc,
         } => check::run(&file, json, quiet, max_findings, no_crc),
         Command::Rules { json } => check::list_rules(json),
+        Command::Create(command) => create::run(command),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

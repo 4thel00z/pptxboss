@@ -109,3 +109,36 @@ def test_documents_are_usable_from_threads(three_slides_pptx: Path) -> None:
     with ThreadPoolExecutor(max_workers=4) as pool:
         titles = list(pool.map(lambda index: doc.slide(index).title, [0, 1, 2] * 4))
     assert titles == ["First slide", "Second slide", "Hidden slide"] * 4
+
+
+def test_check_reports_clause_numbered_findings(three_slides_pptx: Path, tmp_path: Path) -> None:
+    assert pptxboss.check(three_slides_pptx) == []
+    assert pptxboss.check(data=three_slides_pptx.read_bytes()) == []
+    codes = {rule.code for rule in pptxboss.rules()}
+    assert "REL004" in codes and "PML003" in codes
+    assert all(rule.clause.startswith("Part ") for rule in pptxboss.rules())
+    junk = tmp_path / "junk.pptx"
+    junk.write_bytes(b"nope")
+    with pytest.raises(pptxboss.PptxError):
+        pptxboss.check(junk)
+    with pytest.raises(ValueError):
+        pptxboss.check()
+
+
+def test_check_finds_a_missing_part(three_slides_pptx: Path, tmp_path: Path) -> None:
+    import zipfile
+
+    broken = tmp_path / "broken.pptx"
+    with zipfile.ZipFile(three_slides_pptx) as src, zipfile.ZipFile(broken, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename == "ppt/presProps.xml":
+                continue
+            dst.writestr(item, src.read(item.filename))
+    findings = pptxboss.check(broken)
+    codes = [finding.code for finding in findings]
+    assert "PML003" in codes and "REL004" in codes
+    first = findings[0]
+    assert first.severity == "error"
+    assert first.clause.startswith("Part ")
+    assert "PML003" in str(next(f for f in findings if f.code == "PML003"))
+    assert pptxboss.check(broken, max_findings=1) != [] and len(pptxboss.check(broken, max_findings=1)) == 1

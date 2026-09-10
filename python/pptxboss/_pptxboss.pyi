@@ -88,3 +88,27 @@ class Image:
     part: str | None
     content_type: str | None
     external: str | None
+
+class Finding:
+    """One verifier finding."""
+
+    code: str
+    severity: str
+    clause: str
+    part: str | None
+    location: str | None
+    message: str
+
+class Rule:
+    """One verifier rule."""
+
+    code: str
+    severity: str
+    clause: str
+    summary: str
+
+def check(path: str | PathLike[str] | None = None, *, data: bytes | None = None, max_findings: int = 1000, verify_crc: bool = True) -> list[Finding]:
+    """Verifies a deck against ECMA-376 and returns its findings, most severe first."""
+
+def rules() -> list[Rule]:
+    """Every rule the verifier knows."""

@@ -1,0 +1,40 @@
+# CLI reference
+
+Every command takes a path. Warnings go to stderr as `warning:` lines;
+errors as `error:` lines. Exit code 1 means the input could not be read,
+2 means bad usage, except for `check`, which uses 1 for findings at error
+severity and 2 for an unreadable file.
+
+## `pptxboss info FILE [--json]`
+
+Slide count, presentation part, slide size in EMU and inches with its
+declared type, master count, part count, then one line per slide: number,
+title or `(no title)`, and flags among `hidden`, `notes`, `pictures`,
+`tables`. A slide that fails to parse shows `(unreadable: reason)`.
+
+## `pptxboss text FILE [--notes] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
+
+Slide text, slides separated by a blank line; empty slides are skipped
+unless `--headings` or `--json` is given.
+
+## `pptxboss check FILE [--json] [--quiet] [--max-findings N] [--no-crc]`
+
+Findings sorted most severe first, then a summary line
+`FILE: ok|not ok: E error(s), W warning(s), P part(s) checked`.
+
+## `pptxboss rules [--json]`
+
+Every rule: severity, code, clause, summary.
+
+## `pptxboss create blank OUT [--slides N] [--standard]`
+
+## `pptxboss create text OUT --title T [--bullet B]... [--notes N] [--standard]`
+
+## `pptxboss create md OUT INPUT [--standard] [--font F]`
+
+`INPUT` may be `-` for standard input.
+
+## `pptxboss skill install [--global]`, `pptxboss skill show`
+
+Installs the bundled agent skill into `./.claude/skills/pptxboss/SKILL.md`
+or `~/.claude/skills/pptxboss/SKILL.md`, or prints it.

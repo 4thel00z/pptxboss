@@ -1,0 +1,18 @@
+[package]
+name = "pptxboss-write"
+description = "Create .pptx decks in pure Rust: titles, bullets, tables, pictures and speaker notes, written deterministically (ECMA-376)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["pptx", "powerpoint", "ecma-376", "ooxml", "writer"]
+categories = ["encoding", "text-processing"]
+
+[dependencies]
+pptxboss-core = { workspace = true }
+thiserror = "2"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+
+[dev-dependencies]
+pptxboss-check = { workspace = true }

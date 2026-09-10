@@ -286,12 +286,23 @@ struct Scope<'a> {
     ns: Ns,
 }
 
+/// An element on the open stack: its resolved name and the name bytes as written.
+#[derive(Clone, Copy)]
+struct Open<'a> {
+    name: Name<'a>,
+    qname: &'a [u8],
+}
+
 /// The pull tokenizer.
 pub struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
-    open: Vec<(&'a [u8], &'a [u8])>,
+    open: Vec<Open<'a>>,
     scopes: Vec<Scope<'a>>,
+    /// The innermost binding for each prefix first byte; the common case
+    /// resolves with one table lookup and one short compare.
+    first_byte: Box<[Option<(&'a [u8], Ns)>; 256]>,
+    default_ns: Ns,
     pending_end: Option<Name<'a>>,
     other: Vec<&'a [u8]>,
     saw_transitional: bool,
@@ -311,6 +322,8 @@ impl<'a> Reader<'a> {
             pos,
             open: Vec::with_capacity(16),
             scopes: Vec::with_capacity(8),
+            first_byte: Box::new([None; 256]),
+            default_ns: Ns::None,
             pending_end: None,
             other: Vec::new(),
             saw_transitional: false,
@@ -354,7 +367,20 @@ impl<'a> Reader<'a> {
     }
 
     /// Resolves a prefix against the namespaces in scope. `xml` is always bound.
+    #[inline]
     pub fn resolve(&self, prefix: &[u8]) -> Ns {
+        let Some(&first) = prefix.first() else {
+            return self.default_ns;
+        };
+        if let Some((bound, ns)) = self.first_byte[usize::from(first)] {
+            if bound == prefix {
+                return ns;
+            }
+        }
+        self.resolve_slow(prefix)
+    }
+
+    fn resolve_slow(&self, prefix: &[u8]) -> Ns {
         if let Some(scope) = self
             .scopes
             .iter()
@@ -369,12 +395,36 @@ impl<'a> Reader<'a> {
         }
     }
 
+    fn bind(&mut self, prefix: &'a [u8], ns: Ns) {
+        match prefix.first() {
+            None => self.default_ns = ns,
+            Some(&first) => self.first_byte[usize::from(first)] = Some((prefix, ns)),
+        }
+    }
+
+    /// Recomputes the fast binding for `prefix` after its scope was popped.
+    fn rebind(&mut self, prefix: &[u8]) {
+        let remaining = self
+            .scopes
+            .iter()
+            .rev()
+            .find(|scope| match prefix.first() {
+                None => scope.prefix.is_empty(),
+                Some(&first) => scope.prefix.first() == Some(&first),
+            })
+            .map(|scope| (scope.prefix, scope.ns));
+        match prefix.first() {
+            None => self.default_ns = remaining.map_or(Ns::None, |(_, ns)| ns),
+            Some(&first) => self.first_byte[usize::from(first)] = remaining,
+        }
+    }
+
     /// The next token. This is a pull parser, not an iterator: the end of
     /// input is an event, and errors end the stream.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> XmlResult<Event<'a>> {
         if let Some(name) = self.pending_end.take() {
-            self.close(name.prefix, name.local, self.pos)?;
+            self.finish_open();
             return Ok(Event::End(name));
         }
         loop {
@@ -445,12 +495,13 @@ impl<'a> Reader<'a> {
     pub fn skip_element(&mut self) -> XmlResult<()> {
         let target = self.open.len().saturating_sub(1);
         if self.pending_end.take().is_some() {
-            self.open.pop().ok_or(XmlError {
-                offset: self.pos,
-                msg: "nothing to skip",
-            })?;
-            self.pop_scopes();
-            self.root_closed |= self.open.is_empty();
+            if self.open.is_empty() {
+                return Err(XmlError {
+                    offset: self.pos,
+                    msg: "nothing to skip",
+                });
+            }
+            self.finish_open();
             return Ok(());
         }
         loop {
@@ -468,25 +519,27 @@ impl<'a> Reader<'a> {
             })?;
             match kind {
                 b'/' => {
-                    let close = memchr(b'>', &self.data[tag_start..]).ok_or(XmlError {
-                        offset: tag_start,
-                        msg: "unterminated end tag",
-                    })?;
-                    self.pos = tag_start + close + 1;
-                    let (prefix, local) = self.open.pop().ok_or(XmlError {
-                        offset: tag_start,
-                        msg: "end tag without a start tag",
-                    })?;
-                    let (end_prefix, end_local) =
-                        split_qname(trim_ascii(&self.data[tag_start + 2..tag_start + close]));
-                    if prefix != end_prefix || local != end_local {
-                        return Err(XmlError {
-                            offset: tag_start,
-                            msg: "end tag does not match the open element",
-                        });
+                    let fast = self.open.last().and_then(|open| {
+                        let end = tag_start + 2 + open.qname.len();
+                        let hit = self.data.get(tag_start + 2..end) == Some(open.qname)
+                            && self.data.get(end) == Some(&b'>');
+                        hit.then_some(end + 1)
+                    });
+                    match fast {
+                        Some(after) => {
+                            self.pos = after;
+                            self.finish_open();
+                        }
+                        None => {
+                            let close = memchr(b'>', &self.data[tag_start..]).ok_or(XmlError {
+                                offset: tag_start,
+                                msg: "unterminated end tag",
+                            })?;
+                            self.pos = tag_start + close + 1;
+                            let qname = trim_ascii(&self.data[tag_start + 2..tag_start + close]);
+                            self.close(qname, tag_start)?;
+                        }
                     }
-                    self.pop_scopes();
-                    self.root_closed |= self.open.is_empty();
                     if self.open.len() == target {
                         return Ok(());
                     }
@@ -507,11 +560,15 @@ impl<'a> Reader<'a> {
                     }
                 }
                 _ => {
-                    let (name_end, attrs_end, self_closing) = self.scan_start(tag_start)?;
-                    let (prefix, local) = split_qname(&self.data[tag_start + 1..name_end]);
-                    let _ = attrs_end;
+                    let (name_end, _, self_closing, _) = self.scan_start(tag_start)?;
                     if !self_closing {
-                        self.open.push((prefix, local));
+                        let qname = &self.data[tag_start + 1..name_end];
+                        let name = Name {
+                            ns: Ns::None,
+                            prefix: &[],
+                            local: qname,
+                        };
+                        self.open.push(Open { name, qname });
                     }
                 }
             }
@@ -604,11 +661,22 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    fn scan_start(&mut self, tag_start: usize) -> XmlResult<(usize, usize, bool)> {
+    /// Scans a start tag beginning at `tag_start`; returns the end of the
+    /// name, the end of the attribute region and whether the tag is
+    /// self-closing, and leaves `pos` after the tag.
+    fn scan_start(&mut self, tag_start: usize) -> XmlResult<(usize, usize, bool, Option<usize>)> {
         let data = self.data;
         let name_start = tag_start + 1;
         let mut i = name_start;
-        while i < data.len() && !matches!(data[i], b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>') {
+        let mut colon = None;
+        while i < data.len() {
+            let byte = data[i];
+            if NAME_END[usize::from(byte)] {
+                break;
+            }
+            if byte == b':' && colon.is_none() {
+                colon = Some(i);
+            }
             i += 1;
         }
         if i == name_start {
@@ -618,6 +686,22 @@ impl<'a> Reader<'a> {
             });
         }
         let name_end = i;
+        if !self.strict {
+            if let Some(rel) = memchr(b'>', &data[name_end..]) {
+                let gt = name_end + rel;
+                let between = &data[name_end..gt];
+                let quotes = between.iter().filter(|&&b| b == b'"' || b == b'\'').count();
+                if quotes % 2 == 0 {
+                    self.pos = gt + 1;
+                    let self_closing = gt > name_end && data[gt - 1] == b'/';
+                    let attrs_end = match self_closing {
+                        true => gt - 1,
+                        false => gt,
+                    };
+                    return Ok((name_end, attrs_end, self_closing, colon));
+                }
+            }
+        }
         loop {
             while i < data.len() && matches!(data[i], b' ' | b'\t' | b'\r' | b'\n') {
                 i += 1;
@@ -631,7 +715,7 @@ impl<'a> Reader<'a> {
                 }
                 Some(b'>') => {
                     self.pos = i + 1;
-                    return Ok((name_end, i, false));
+                    return Ok((name_end, i, false, colon));
                 }
                 Some(b'/') => {
                     if data.get(i + 1) != Some(&b'>') {
@@ -641,7 +725,7 @@ impl<'a> Reader<'a> {
                         });
                     }
                     self.pos = i + 2;
-                    return Ok((name_end, i, true));
+                    return Ok((name_end, i, true, colon));
                 }
                 Some(_) => {
                     let eq = memchr3(b'=', b'>', b'/', &data[i..])
@@ -694,9 +778,16 @@ impl<'a> Reader<'a> {
     }
 
     fn start_tag(&mut self, tag_start: usize) -> XmlResult<Event<'a>> {
-        let (name_end, attrs_end, self_closing) = self.scan_start(tag_start)?;
+        let (name_end, attrs_end, self_closing, colon) = self.scan_start(tag_start)?;
         let raw_attrs = &self.data[name_end..attrs_end];
-        let (prefix, local) = split_qname(&self.data[tag_start + 1..name_end]);
+        let qname = &self.data[tag_start + 1..name_end];
+        let (prefix, local): (&'a [u8], &'a [u8]) = match colon {
+            Some(colon) => (
+                &self.data[tag_start + 1..colon],
+                &self.data[colon + 1..name_end],
+            ),
+            None => (&[], qname),
+        };
         if self.strict {
             let valid = is_ncname(local) && (prefix.is_empty() || is_ncname(prefix));
             if !valid {
@@ -713,7 +804,7 @@ impl<'a> Reader<'a> {
             }
         }
         let depth = self.open.len() + 1;
-        if xmlns_finder().find(raw_attrs).is_some() {
+        if raw_attrs.len() >= 6 && xmlns_finder().find(raw_attrs).is_some() {
             self.declare_namespaces(raw_attrs, depth, tag_start)?;
         }
         let ns = self.resolve(prefix);
@@ -724,7 +815,7 @@ impl<'a> Reader<'a> {
             });
         }
         let name = Name { ns, prefix, local };
-        self.open.push((prefix, local));
+        self.open.push(Open { name, qname });
         if self_closing {
             self.pending_end = Some(name);
         }
@@ -782,6 +873,7 @@ impl<'a> Reader<'a> {
                 prefix: declared_prefix,
                 ns,
             });
+            self.bind(declared_prefix, ns);
         }
         Ok(())
     }
@@ -810,6 +902,16 @@ impl<'a> Reader<'a> {
     }
 
     fn end_tag(&mut self, tag_start: usize) -> XmlResult<Event<'a>> {
+        if let Some(open) = self.open.last().copied() {
+            let end = tag_start + 2 + open.qname.len();
+            let matches_open = self.data.get(tag_start + 2..end) == Some(open.qname)
+                && self.data.get(end) == Some(&b'>');
+            if matches_open {
+                self.pos = end + 1;
+                self.finish_open();
+                return Ok(Event::End(open.name));
+            }
+        }
         let close = memchr(b'>', &self.data[tag_start..])
             .map(|rel| tag_start + rel)
             .ok_or(XmlError {
@@ -817,36 +919,45 @@ impl<'a> Reader<'a> {
                 msg: "unterminated end tag",
             })?;
         let qname = trim_ascii(&self.data[tag_start + 2..close]);
-        let (prefix, local) = split_qname(qname);
         self.pos = close + 1;
-        let ns = self.resolve(prefix);
-        self.close(prefix, local, tag_start)?;
-        Ok(Event::End(Name { ns, prefix, local }))
+        let name = self.close(qname, tag_start)?;
+        Ok(Event::End(name))
     }
 
-    fn close(&mut self, prefix: &[u8], local: &[u8], offset: usize) -> XmlResult<()> {
-        let Some((open_prefix, open_local)) = self.open.pop() else {
+    /// Pops the open element, which must be named `qname` as written.
+    fn close(&mut self, qname: &[u8], offset: usize) -> XmlResult<Name<'a>> {
+        let Some(open) = self.open.last().copied() else {
             return Err(XmlError {
                 offset,
                 msg: "end tag without a start tag",
             });
         };
-        if open_prefix != prefix || open_local != local {
+        if open.qname != qname {
             return Err(XmlError {
                 offset,
                 msg: "end tag does not match the open element",
             });
         }
+        self.finish_open();
+        Ok(open.name)
+    }
+
+    /// Pops the open element and the namespaces it declared.
+    #[inline]
+    fn finish_open(&mut self) {
+        self.open.pop();
         self.pop_scopes();
         self.root_closed |= self.open.is_empty();
-        Ok(())
     }
 
     #[inline]
     fn pop_scopes(&mut self) {
         let depth = self.open.len() + 1;
         while self.scopes.last().is_some_and(|scope| scope.depth == depth) {
-            self.scopes.pop();
+            let Some(scope) = self.scopes.pop() else {
+                return;
+            };
+            self.rebind(scope.prefix);
         }
     }
 }
@@ -910,6 +1021,18 @@ fn next_raw_attr(raw: &[u8], mut pos: usize) -> Option<(&[u8], &[u8], usize)> {
     let close = memchr(quote, &raw[v + 1..]).map(|rel| v + 1 + rel)?;
     Some((name, &raw[v + 1..close], close + 1))
 }
+
+/// Bytes that end an element name inside a start tag.
+static NAME_END: [bool; 256] = {
+    let mut table = [false; 256];
+    table[b' ' as usize] = true;
+    table[b'\t' as usize] = true;
+    table[b'\r' as usize] = true;
+    table[b'\n' as usize] = true;
+    table[b'/' as usize] = true;
+    table[b'>' as usize] = true;
+    table
+};
 
 #[inline]
 fn split_qname(qname: &[u8]) -> (&[u8], &[u8]) {

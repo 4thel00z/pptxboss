@@ -14,7 +14,7 @@ def stub_names() -> set[str]:
     tree = ast.parse(STUB.read_text())
     names: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.ClassDef):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
             names.add(node.name)
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)

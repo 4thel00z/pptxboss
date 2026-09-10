@@ -1,0 +1,11 @@
+[book]
+title = "pptxboss"
+authors = ["4thel00z"]
+description = "A PowerPoint engine written from scratch in Rust: read, verify and create .pptx decks"
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/4thel00z/pptxboss"
+edit-url-template = "https://github.com/4thel00z/pptxboss/edit/main/docs/{path}"
+site-url = "/pptxboss/"

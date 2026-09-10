@@ -649,6 +649,120 @@ impl Image {
     }
 }
 
+/// One verifier finding.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Finding {
+    /// Stable rule code such as `REL004`.
+    #[pyo3(get)]
+    code: String,
+    /// `error`, `warning` or `info`.
+    #[pyo3(get)]
+    severity: String,
+    /// The ECMA-376 clause the rule enforces.
+    #[pyo3(get)]
+    clause: String,
+    #[pyo3(get)]
+    part: Option<String>,
+    #[pyo3(get)]
+    location: Option<String>,
+    #[pyo3(get)]
+    message: String,
+}
+
+#[pymethods]
+impl Finding {
+    fn __repr__(&self) -> String {
+        format!("Finding({} {} {})", self.severity, self.code, self.message)
+    }
+
+    fn __str__(&self) -> String {
+        let part = self
+            .part
+            .as_deref()
+            .map(|part| format!("{part}: "))
+            .unwrap_or_default();
+        format!(
+            "{} {} {part}{} [{}]",
+            self.severity, self.code, self.message, self.clause
+        )
+    }
+}
+
+/// One verifier rule.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Rule {
+    #[pyo3(get)]
+    code: String,
+    #[pyo3(get)]
+    severity: String,
+    #[pyo3(get)]
+    clause: String,
+    #[pyo3(get)]
+    summary: String,
+}
+
+#[pymethods]
+impl Rule {
+    fn __repr__(&self) -> String {
+        format!("Rule({} {} [{}])", self.severity, self.code, self.clause)
+    }
+}
+
+/// Verifies a deck against ECMA-376 and returns its findings, most severe first.
+#[pyfunction]
+#[pyo3(signature = (path=None, *, data=None, max_findings=1000, verify_crc=true))]
+fn check(
+    py: Python<'_>,
+    path: Option<PathBuf>,
+    data: Option<Vec<u8>>,
+    max_findings: usize,
+    verify_crc: bool,
+) -> PyResult<Vec<Finding>> {
+    let options = pptxboss_check::CheckOptions {
+        max_findings,
+        verify_crc,
+        ..pptxboss_check::CheckOptions::default()
+    };
+    let report = match (path, data) {
+        (Some(path), None) => py.allow_threads(|| pptxboss_check::check_path(path, &options)),
+        (None, Some(data)) => py.allow_threads(|| pptxboss_check::check_bytes(data, &options)),
+        _ => {
+            return Err(PyValueError::new_err(
+                "pass either a path or data=, not both",
+            ))
+        }
+    }
+    .map_err(pptx_err)?;
+    Ok(report
+        .findings
+        .into_iter()
+        .map(|finding| Finding {
+            code: finding.code.to_string(),
+            severity: finding.severity.to_string(),
+            clause: finding.clause.to_string(),
+            part: finding.part,
+            location: finding.location,
+            message: finding.message,
+        })
+        .collect())
+}
+
+/// Every rule the verifier knows.
+#[pyfunction]
+fn rules() -> Vec<Rule> {
+    pptxboss_check::rules()
+        .into_iter()
+        .map(|rule| Rule {
+            code: rule.code.to_string(),
+            severity: rule.severity.to_string(),
+            clause: rule.clause.to_string(),
+            summary: rule.summary.to_string(),
+        })
+        .collect()
+}
+
 #[pymodule]
 fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -658,5 +772,9 @@ fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SlideIter>()?;
     m.add_class::<Shape>()?;
     m.add_class::<Image>()?;
+    m.add_class::<Finding>()?;
+    m.add_class::<Rule>()?;
+    m.add_function(wrap_pyfunction!(check, m)?)?;
+    m.add_function(wrap_pyfunction!(rules, m)?)?;
     Ok(())
 }

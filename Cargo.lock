@@ -370,6 +370,7 @@ dependencies = [
  "pptxboss-check",
  "pptxboss-core",
  "pptxboss-testkit",
+ "pptxboss-write",
  "serde",
  "serde_json",
 ]
@@ -389,6 +390,7 @@ dependencies = [
 name = "pptxboss-py"
 version = "0.1.0"
 dependencies = [
+ "pptxboss-check",
  "pptxboss-core",
  "pyo3",
 ]
@@ -398,6 +400,16 @@ name = "pptxboss-testkit"
 version = "0.1.0"
 dependencies = [
  "flate2",
+]
+
+[[package]]
+name = "pptxboss-write"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "pptxboss-check",
+ "pptxboss-core",
+ "thiserror",
 ]
 
 [[package]]

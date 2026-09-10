@@ -537,13 +537,13 @@ impl Archive {
         }
         match entry.method {
             METHOD_STORED => self.read_raw(entry, out),
-            METHOD_DEFLATE => {
-                let mut compressed = Vec::new();
+            METHOD_DEFLATE => COMPRESSED.with(|cell| {
+                let mut compressed = cell.borrow_mut();
                 self.read_raw(entry, &mut compressed)?;
                 out.clear();
                 let expected = usize::try_from(entry.uncompressed_size).unwrap_or(0);
                 inflate(&compressed, expected, out)
-            }
+            }),
             other => Err(Error::Unsupported(format!(
                 "zip compression method {other} for {}",
                 entry.name
@@ -705,7 +705,27 @@ fn apply_extras(entry: &mut Entry, mut extra: &[u8]) {
 
 /// Inflates a raw DEFLATE stream, pre-sizing `out` to `expected` bytes.
 pub fn inflate(input: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<()> {
-    let mut decoder = Decompress::new(false);
+    INFLATER.with(|cell| {
+        let mut decoder = cell.borrow_mut();
+        decoder.reset(false);
+        inflate_with(&mut decoder, input, expected, out)
+    })
+}
+
+thread_local! {
+    /// One inflater per thread: its state is large enough that creating
+    /// one per part shows up in profiles.
+    static INFLATER: std::cell::RefCell<Decompress> = std::cell::RefCell::new(Decompress::new(false));
+    /// Scratch buffer for compressed bytes read from the source.
+    static COMPRESSED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn inflate_with(
+    decoder: &mut Decompress,
+    input: &[u8],
+    expected: usize,
+    out: &mut Vec<u8>,
+) -> Result<()> {
     out.reserve(expected.max(64));
     loop {
         let consumed = usize::try_from(decoder.total_in())

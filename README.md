@@ -65,6 +65,9 @@ pptxboss text --json deck.pptx      # [{"number": 1, "text": "..."}, ...]
 pptxboss check deck.pptx            # verify against ECMA-376; exit 1 on errors
 pptxboss check --json --quiet deck.pptx
 pptxboss rules                      # every rule with its code, severity and clause
+pptxboss create text out.pptx --title "Hello" --bullet "one" --bullet "two" --notes "say hi"
+pptxboss create md out.pptx deck.md # '#' title slide, '##' content slides, list items, Notes:
+pptxboss create blank out.pptx --slides 3
 ```
 
 Text semantics: shapes in z-order (which ECMA-376 makes the reading order),
@@ -87,6 +90,9 @@ for slide in doc:                      # slides parse lazily
     for image in slide.images():       # pictures with their image parts
         data = slide.image_bytes(image)
 text, warnings = doc.text_reporting()  # whole deck, plus what was skipped
+
+for finding in pptxboss.check("deck.pptx"):   # the verifier, most severe first
+    print(finding.severity, finding.code, finding.clause, finding.message)
 ```
 
 ```rust
@@ -110,6 +116,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Create decks
+
+```rust
+use pptxboss_write::{Presentation, Rect, Slide};
+
+let deck = Presentation::new()
+    .slide(Slide::title_slide("Quarterly review", Some("Q3 2026")))
+    .slide(Slide::titled("Highlights").bullet("Revenue up").sub_bullet("in every region", 1).notes("Pause here"))
+    .slide(Slide::titled("Numbers").table(Rect::inches(1.0, 1.8, 11.0, 2.0), vec![vec!["Region".into(), "Growth".into()], vec!["EMEA".into(), "12%".into()]], true));
+deck.write_to("review.pptx")?;
+```
+
+Output is deterministic (fixed timestamps, fixed part order), reads back
+through `pptxboss-core`, and passes `pptxboss check` with no findings.
 
 ## Benchmarks
 
@@ -138,6 +159,7 @@ machine-dependent; reproduce with [`benchmarks/bench.py`](benchmarks/README.md).
 |---|---|
 | `pptxboss-core` | ZIP container with positioned reads, CRC-32, XML pull tokenizer, OPC package model, PresentationML document model, text extraction |
 | `pptxboss-check` | The verifier: 71 clause-numbered rules over package and presentation structure |
+| `pptxboss-write` | Creates decks: titles, bullets, paragraphs, text boxes, tables, pictures, notes; Markdown to slides; deterministic output that verifies clean |
 | `pptxboss-cli` | The `pptxboss` binary |
 | `pptxboss-py` | The `pptxboss._pptxboss` extension module behind the Python package |
 | `pptxboss-testkit` | In-memory ZIP and deck builders for tests; not published |

@@ -56,7 +56,10 @@ struct Shared {
     parts: Vec<Part>,
     index: FastMap<String, usize>,
     content_types: ContentTypes,
-    defects: PackageDefects,
+    /// Defects found while indexing; the name-grammar and derivability
+    /// checks are added on first request, since only the verifier reads them.
+    base_defects: PackageDefects,
+    defects: std::sync::OnceLock<PackageDefects>,
 }
 
 /// A thread-safe handle from which a [`Package`] with fresh caches is made.
@@ -114,9 +117,6 @@ impl Package {
                 continue;
             }
             let name = format!("/{}", entry.name);
-            if let Err(reason) = validate_part_name(&name) {
-                defects.invalid_names.push((name.clone(), reason));
-            }
             let key = equivalence_key(&name);
             if let Some(&existing) = index.get(&key) {
                 let existing: &Part = &parts[existing];
@@ -128,7 +128,6 @@ impl Package {
             index.insert(key, parts.len());
             parts.push(Part { name, entry: i });
         }
-        find_derivable(&parts, &mut defects);
 
         let content_types = match content_types_entry {
             None => {
@@ -155,7 +154,8 @@ impl Package {
             parts,
             index,
             content_types,
-            defects,
+            base_defects: defects,
+            defects: std::sync::OnceLock::new(),
         });
         Ok(Self::with_shared(shared))
     }
@@ -192,7 +192,16 @@ impl Package {
     }
 
     pub fn defects(&self) -> &PackageDefects {
-        &self.shared.defects
+        self.shared.defects.get_or_init(|| {
+            let mut defects = self.shared.base_defects.clone();
+            for part in &self.shared.parts {
+                if let Err(reason) = validate_part_name(&part.name) {
+                    defects.invalid_names.push((part.name.clone(), reason));
+                }
+            }
+            find_derivable(&self.shared.parts, &mut defects);
+            defects
+        })
     }
 
     /// The index of the part named `name`, compared ASCII case-insensitively.
