@@ -108,3 +108,44 @@ fn a_broken_slide_is_a_warning_not_a_failure() {
     assert!(stderr.starts_with("warning: slide 1: unreadable"));
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn check_reports_findings_and_exit_codes() {
+    let path = fixture("check-clean", &deck());
+    let (code, stdout, stderr) = run(&["check", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains(": ok: 0 error(s), 0 warning(s)"));
+    let broken = fixture("check-broken", &deck().without_part("ppt/presProps.xml"));
+    let (code, stdout, stderr) = run(&["check", broken.to_str().unwrap()]);
+    assert_eq!(code, 1, "{stdout}{stderr}");
+    assert!(stdout.contains("error   PML003"), "{stdout}");
+    assert!(stdout.contains("error   REL004"), "{stdout}");
+    assert!(stdout.contains(": not ok:"));
+    let (code, stdout, _) = run(&["check", "--json", broken.to_str().unwrap()]);
+    assert_eq!(code, 1);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(value["errors"].as_u64().unwrap() >= 2);
+    assert_eq!(value["findings"][0]["severity"], "error");
+    let junk = std::env::temp_dir().join(format!(
+        "pptxboss-cli-{}-check-junk.pptx",
+        std::process::id()
+    ));
+    std::fs::write(&junk, b"nope").unwrap();
+    let (code, _, stderr) = run(&["check", junk.to_str().unwrap()]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("not a zip archive"));
+    for p in [path, broken, junk] {
+        std::fs::remove_file(p).unwrap();
+    }
+}
+
+#[test]
+fn rules_lists_every_code() {
+    let (code, stdout, _) = run(&["rules"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("REL004"));
+    assert!(stdout.contains("[Part 2 6.5.3.4]"));
+    let (_, stdout, _) = run(&["rules", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(value.as_array().unwrap().len() > 40);
+}

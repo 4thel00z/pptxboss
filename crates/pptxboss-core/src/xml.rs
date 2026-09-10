@@ -14,7 +14,14 @@
 //! is lenient by default so a damaged slide still yields its text; the
 //! verifier runs [`well_formed`] for the full check.
 
+use std::sync::OnceLock;
+
 use memchr::{memchr, memchr2, memchr3, memmem};
+
+fn xmlns_finder() -> &'static memmem::Finder<'static> {
+    static FINDER: OnceLock<memmem::Finder<'static>> = OnceLock::new();
+    FINDER.get_or_init(|| memmem::Finder::new(b"xmlns"))
+}
 
 /// A namespace the reader recognizes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -362,7 +369,9 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// The next token.
+    /// The next token. This is a pull parser, not an iterator: the end of
+    /// input is an event, and errors end the stream.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> XmlResult<Event<'a>> {
         if let Some(name) = self.pending_end.take() {
             self.close(name.prefix, name.local, self.pos)?;
@@ -704,7 +713,7 @@ impl<'a> Reader<'a> {
             }
         }
         let depth = self.open.len() + 1;
-        if memmem::find(raw_attrs, b"xmlns").is_some() {
+        if xmlns_finder().find(raw_attrs).is_some() {
             self.declare_namespaces(raw_attrs, depth, tag_start)?;
         }
         let ns = self.resolve(prefix);
@@ -782,8 +791,12 @@ impl<'a> Reader<'a> {
             return Ns::None;
         }
         if let Some((_, ns, conformance)) = KNOWN.iter().find(|(known, _, _)| *known == uri) {
+            let class_specific = matches!(
+                ns,
+                Ns::Pml | Ns::Dml | Ns::Rel | Ns::Ep | Ns::Vt | Ns::Chart | Ns::Dgm | Ns::Pic
+            );
             match conformance {
-                Conformance::Transitional if *ns != Ns::Xml => self.saw_transitional = true,
+                Conformance::Transitional if class_specific => self.saw_transitional = true,
                 Conformance::Strict => self.saw_strict = true,
                 _ => {}
             }

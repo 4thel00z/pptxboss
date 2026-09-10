@@ -1,0 +1,17 @@
+[package]
+name = "pptxboss-py"
+description = "Python bindings for pptxboss (extension module pptxboss._pptxboss)"
+# Distributed as wheels on PyPI via maturin, never as a crate.
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_pptxboss"
+crate-type = ["cdylib"]
+
+[dependencies]
+pptxboss-core = { path = "../pptxboss-core" }
+pyo3 = { version = "0.25", features = ["abi3-py312"] }

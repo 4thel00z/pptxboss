@@ -42,8 +42,8 @@ pub fn crc32(data: &[u8]) -> u32 {
 /// Continues a CRC-32 computation: `update(crc32(a), b) == crc32(a ++ b)`.
 pub fn update(crc: u32, data: &[u8]) -> u32 {
     let mut crc = !crc;
-    let mut chunks = data.chunks_exact(8);
-    for chunk in &mut chunks {
+    let (chunks, remainder) = data.as_chunks::<8>();
+    for chunk in chunks {
         let low = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) ^ crc;
         let high = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
         crc = TABLES[7][(low & 0xff) as usize]
@@ -55,7 +55,7 @@ pub fn update(crc: u32, data: &[u8]) -> u32 {
             ^ TABLES[1][((high >> 16) & 0xff) as usize]
             ^ TABLES[0][(high >> 24) as usize];
     }
-    for &byte in chunks.remainder() {
+    for &byte in remainder {
         crc = TABLES[0][((crc ^ u32::from(byte)) & 0xff) as usize] ^ (crc >> 8);
     }
     !crc

@@ -1,0 +1,17 @@
+[package]
+name = "pptxboss-check"
+description = "Verifier for .pptx packages against ECMA-376: container, package, relationships and PresentationML structure, with clause-numbered findings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["pptx", "ooxml", "ecma-376", "validator", "lint"]
+categories = ["development-tools", "parser-implementations"]
+
+[dependencies]
+pptxboss-core = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+pptxboss-testkit = { path = "../pptxboss-testkit" }

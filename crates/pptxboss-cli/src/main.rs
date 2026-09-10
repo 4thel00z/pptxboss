@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use pptxboss_core::{Document, TextOptions};
 
+mod check;
 mod info;
 mod text;
 
@@ -49,6 +50,29 @@ enum Command {
         #[arg(long)]
         headings: bool,
         /// Emit one JSON object per slide instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a deck against ECMA-376: container, package, relationships and PresentationML structure.
+    ///
+    /// Exit code 0 when no errors were found, 1 when errors were found, 2 when the file could not be opened.
+    Check {
+        file: PathBuf,
+        /// Emit the findings as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Show only errors.
+        #[arg(long, short)]
+        quiet: bool,
+        /// Stop after this many findings.
+        #[arg(long, default_value_t = 1000)]
+        max_findings: usize,
+        /// Skip CRC-32 verification of XML parts.
+        #[arg(long)]
+        no_crc: bool,
+    },
+    /// List the verifier's rules with their codes, severities and clauses.
+    Rules {
         #[arg(long)]
         json: bool,
     },
@@ -100,11 +124,21 @@ fn main() -> ExitCode {
             };
             open(&file).and_then(|doc| text::run(&doc, &options, headings, json))
         }
+        Command::Check {
+            file,
+            json,
+            quiet,
+            max_findings,
+            no_crc,
+        } => check::run(&file, json, quiet, max_findings, no_crc),
+        Command::Rules { json } => check::list_rules(json),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => {
-            let _ = writeln!(std::io::stderr(), "error: {}", failure.message);
+            if !failure.message.is_empty() {
+                let _ = writeln!(std::io::stderr(), "error: {}", failure.message);
+            }
             ExitCode::from(failure.code)
         }
     }

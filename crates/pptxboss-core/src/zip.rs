@@ -55,6 +55,9 @@ pub const FLAG_UTF8_NAMES: u16 = 1 << 11;
 pub trait Source: Send + Sync {
     /// Total length in bytes.
     fn len(&self) -> u64;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     /// Fills `buf` from `offset`; fails if the range is out of bounds.
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()>;
 }
@@ -207,6 +210,9 @@ pub struct Layout {
     /// records, or between the end record and the end of the source after
     /// the comment; zero for a well-formed archive.
     pub trailing_garbage: u64,
+    /// True when no central directory was found and the entry list was
+    /// rebuilt by scanning for local file headers.
+    pub reconstructed: bool,
 }
 
 /// A parsed archive: central directory in memory, entry data on demand.
@@ -229,7 +235,9 @@ impl Archive {
         let tail_start = len - tail_len as u64;
         let mut tail = vec![0u8; tail_len];
         source.read_at(tail_start, &mut tail)?;
-        let end_pos = find_end_record(&tail).ok_or(Error::NotZip)?;
+        let Some(end_pos) = find_end_record(&tail) else {
+            return Self::reconstruct(source, len);
+        };
         let end = &tail[end_pos..];
         let end_record_offset = tail_start + end_pos as u64;
         let comment_len = usize::from(u16_at(end, 20));
@@ -280,13 +288,16 @@ impl Archive {
         layout.central_size = central_size;
         layout.central_offset = central_offset;
 
-        let central_start = locate_central(
+        let central_start = match locate_central(
             &source,
             central_offset,
             central_size,
             records_start,
             layout.offset_shift,
-        )?;
+        ) {
+            Ok(start) => start,
+            Err(_) => return Self::reconstruct(source, len),
+        };
         layout.offset_shift = central_start.wrapping_sub(central_offset);
         let readable = records_start.saturating_sub(central_start);
         let central_len = usize::try_from(central_size.min(readable))
@@ -346,6 +357,93 @@ impl Archive {
             index.insert(entry.name.clone(), i);
         }
 
+        Ok(Self {
+            source,
+            entries,
+            index,
+            duplicates,
+            layout,
+        })
+    }
+
+    /// Rebuilds the entry list from local file headers when the central
+    /// directory is missing or unreadable (a truncated download, a file
+    /// cut before its directory). Entries with a data descriptor take their
+    /// sizes from the descriptor found before the next header.
+    fn reconstruct(source: Arc<dyn Source>, len: u64) -> Result<Self> {
+        let total = usize::try_from(len).map_err(|_| Error::NotZip)?;
+        let mut data = vec![0u8; total];
+        source.read_at(0, &mut data)?;
+        let positions: Vec<usize> = memmem::find_iter(&data, &LOCAL_HEADER_SIG).collect();
+        if positions.is_empty() {
+            return Err(Error::NotZip);
+        }
+        let mut entries = Vec::with_capacity(positions.len());
+        for (i, &pos) in positions.iter().enumerate() {
+            let Some(header) = data.get(pos..pos + LOCAL_HEADER_LEN) else {
+                break;
+            };
+            let name_len = usize::from(u16_at(header, 26));
+            let extra_len = usize::from(u16_at(header, 28));
+            let data_offset = pos + LOCAL_HEADER_LEN + name_len + extra_len;
+            let Some(raw_name) =
+                data.get(pos + LOCAL_HEADER_LEN..pos + LOCAL_HEADER_LEN + name_len)
+            else {
+                break;
+            };
+            if raw_name.is_empty() || raw_name.contains(&0) || data_offset > data.len() {
+                continue;
+            }
+            let flags = u16_at(header, 6);
+            let next = positions.get(i + 1).copied().unwrap_or_else(|| {
+                memmem::find(&data[data_offset..], &CENTRAL_HEADER_SIG)
+                    .map_or(data.len(), |rel| data_offset + rel)
+            });
+            let (crc, compressed_size, uncompressed_size) = match flags & FLAG_DATA_DESCRIPTOR != 0
+            {
+                false => (
+                    u32_at(header, 14),
+                    u64::from(u32_at(header, 18)),
+                    u64::from(u32_at(header, 22)),
+                ),
+                true => match descriptor_before(&data, data_offset, next) {
+                    Some(descriptor) => descriptor,
+                    None => continue,
+                },
+            };
+            entries.push(Entry {
+                name: String::from_utf8_lossy(raw_name).into_owned(),
+                raw_name: raw_name.to_vec(),
+                method: u16_at(header, 8),
+                flags,
+                version_needed: u16_at(header, 4),
+                crc32: crc,
+                compressed_size,
+                uncompressed_size,
+                header_offset: pos as u64,
+                central_offset: 0,
+                extra_ids: Vec::new(),
+                has_comment: false,
+            });
+        }
+        if entries.is_empty() {
+            return Err(Error::NotZip);
+        }
+        let mut index = FastMap::default();
+        let mut duplicates = Vec::new();
+        for (i, entry) in entries.iter().enumerate() {
+            if index.contains_key(&entry.name) {
+                duplicates.push(i);
+                continue;
+            }
+            index.insert(entry.name.clone(), i);
+        }
+        let layout = Layout {
+            len,
+            declared_entries: entries.len() as u64,
+            reconstructed: true,
+            ..Layout::default()
+        };
         Ok(Self {
             source,
             entries,
@@ -495,6 +593,31 @@ impl Archive {
     }
 }
 
+/// Reads the data descriptor that ends just before `next`, with or without
+/// its signature, returning `(crc, compressed size, uncompressed size)`
+/// when the compressed size is consistent with the span it describes.
+fn descriptor_before(data: &[u8], data_offset: usize, next: usize) -> Option<(u32, u64, u64)> {
+    for (len, signed) in [(16usize, true), (12, false)] {
+        let Some(start) = next.checked_sub(len) else {
+            continue;
+        };
+        if start < data_offset {
+            continue;
+        }
+        let descriptor = &data[start..next];
+        let body = match signed {
+            true if descriptor[..4] == 0x0807_4b50u32.to_le_bytes() => &descriptor[4..],
+            true => continue,
+            false => descriptor,
+        };
+        let compressed = u64::from(u32_at(body, 4));
+        if compressed == (start - data_offset) as u64 {
+            return Some((u32_at(body, 0), compressed, u64::from(u32_at(body, 8))));
+        }
+    }
+    None
+}
+
 fn find_end_record(tail: &[u8]) -> Option<usize> {
     let mut candidates =
         memmem::rfind_iter(tail, &END_RECORD_SIG).filter(|pos| pos + END_RECORD_LEN <= tail.len());
@@ -561,7 +684,11 @@ fn apply_extras(entry: &mut Entry, mut extra: &[u8]) {
         let body = extra.get(4..4 + len).unwrap_or(&extra[4..]);
         entry.extra_ids.push(id);
         if id == ZIP64_EXTRA_ID {
-            let mut fields = body.chunks_exact(8).map(|chunk| u64_at(chunk, 0));
+            let mut fields = body
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| u64::from_le_bytes(*chunk));
             if entry.uncompressed_size == 0xffff_ffff {
                 entry.uncompressed_size = fields.next().unwrap_or(entry.uncompressed_size);
             }
@@ -775,6 +902,72 @@ mod tests {
             Archive::from_bytes(Vec::new()),
             Err(Error::NotZip)
         ));
+        assert!(matches!(
+            Archive::from_bytes(b"PK\x03\x04 and then nothing useful at all".to_vec()),
+            Err(Error::NotZip)
+        ));
+    }
+
+    #[test]
+    fn a_missing_central_directory_is_rebuilt_from_local_headers() {
+        for builder in [
+            ZipBuilder::new(),
+            ZipBuilder::new().with_data_descriptors(),
+            ZipBuilder::new().with_descriptor_signature(),
+        ] {
+            let bytes = builder
+                .deflated("a.xml", b"<a>alpha</a>")
+                .stored("b.bin", b"BB")
+                .deflated("c.xml", &[b'c'; 4000])
+                .build();
+            let central = memmem::find(&bytes, &CENTRAL_HEADER_SIG).unwrap();
+            let truncated = bytes[..central + 7].to_vec();
+            let archive = Archive::from_bytes(truncated).unwrap();
+            assert!(archive.layout().reconstructed);
+            assert_eq!(names(&archive), ["a.xml", "b.bin", "c.xml"]);
+            assert_eq!(
+                archive
+                    .read_to_vec(archive.entry("a.xml").unwrap())
+                    .unwrap(),
+                b"<a>alpha</a>"
+            );
+            assert_eq!(
+                archive
+                    .read_to_vec(archive.entry("b.bin").unwrap())
+                    .unwrap(),
+                b"BB"
+            );
+            assert_eq!(
+                archive
+                    .read_to_vec(archive.entry("c.xml").unwrap())
+                    .unwrap(),
+                vec![b'c'; 4000]
+            );
+            assert!(Archive::crc_matches(
+                archive.entry("c.xml").unwrap(),
+                &[b'c'; 4000]
+            ));
+        }
+    }
+
+    #[test]
+    fn a_file_cut_inside_its_last_entry_still_yields_the_earlier_ones() {
+        let bytes = ZipBuilder::new()
+            .deflated("a.xml", b"<a/>")
+            .deflated("b.xml", &[b'b'; 3000])
+            .build();
+        let second = memmem::find_iter(&bytes, &LOCAL_HEADER_SIG).nth(1).unwrap();
+        let archive = Archive::from_bytes(bytes[..second + 40].to_vec()).unwrap();
+        assert!(archive.layout().reconstructed);
+        assert_eq!(
+            archive
+                .read_to_vec(archive.entry("a.xml").unwrap())
+                .unwrap(),
+            b"<a/>"
+        );
+        assert!(archive
+            .read_to_vec(archive.entry("b.xml").unwrap())
+            .is_err());
     }
 
     #[test]

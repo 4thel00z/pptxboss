@@ -1,0 +1,51 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pptxboss"
+version = "0.1.0"
+description = "Fast PowerPoint (.pptx) reading in pure Rust: text, notes, tables, images and structure, with pythonic bindings"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "4thel00z" }]
+keywords = ["pptx", "powerpoint", "presentationml", "ooxml", "ecma-376", "text-extraction", "rust"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/4thel00z/pptxboss"
+Repository = "https://github.com/4thel00z/pptxboss"
+Issues = "https://github.com/4thel00z/pptxboss/issues"
+Changelog = "https://github.com/4thel00z/pptxboss/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+python-source = "python"
+module-name = "pptxboss._pptxboss"
+manifest-path = "crates/pptxboss-py/Cargo.toml"
+features = ["pyo3/extension-module"]
+# The declared License-Files live at the workspace root, outside the
+# manifest dir; include them explicitly or PyPI rejects the sdist (PEP 639).
+include = [
+    { path = "LICENSE-MIT", format = "sdist" },
+    { path = "LICENSE-APACHE", format = "sdist" },
+]
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7",
+    "pytest>=8",
+    "pyyaml>=6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

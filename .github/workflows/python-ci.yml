@@ -1,0 +1,59 @@
+name: python-ci
+
+on:
+  push:
+    branches: [main, master]
+    paths: ["crates/**", "python/**", "tests/**", "Cargo.*", "pyproject.toml", ".github/workflows/python-ci.yml"]
+  pull_request:
+    paths: ["crates/**", "python/**", "tests/**", "Cargo.*", "pyproject.toml", ".github/workflows/python-ci.yml"]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install . pytest pyyaml
+      - run: pytest -q
+
+  build:
+    name: wheel (${{ matrix.platform.os }} ${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: ubuntu-latest, target: x86_64 }
+          - { os: macos-latest, target: aarch64 }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: "true"
+      - name: Import smoke test
+        shell: bash
+        run: |
+          python -m venv smoke
+          . smoke/bin/activate
+          pip install dist/*.whl
+          python -c "import pptxboss; print(pptxboss.__version__)"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist

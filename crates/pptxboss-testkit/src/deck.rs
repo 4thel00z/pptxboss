@@ -364,7 +364,7 @@ impl Deck {
         let mut builder = ZipBuilder::new();
         let mut seen = Vec::new();
         for (name, bytes) in self.parts() {
-            if self.omitted.iter().any(|omitted| *omitted == name) {
+            if self.omitted.contains(&name) {
                 continue;
             }
             seen.push(name.clone());

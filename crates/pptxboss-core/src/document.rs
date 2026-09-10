@@ -287,6 +287,11 @@ impl Document {
             );
             report.hidden_slides_skipped += slide_report.hidden_slides_skipped;
             report.unknown_graphics += slide_report.unknown_graphics;
+            for uri in slide_report.unknown_graphic_uris {
+                if !report.unknown_graphic_uris.contains(&uri) {
+                    report.unknown_graphic_uris.push(uri);
+                }
+            }
             report.unknown_elements += slide_report.unknown_elements;
             texts.push(text);
         }
@@ -403,6 +408,11 @@ impl<'d> Slide<'d> {
     /// The slide text with `options`, recording problems in `report`.
     pub fn text_reporting(&self, options: &TextOptions, report: &mut ExtractReport) -> String {
         report.unknown_graphics += self.report.unknown_graphics.len() as u32;
+        for uri in &self.report.unknown_graphics {
+            if !report.unknown_graphic_uris.contains(uri) {
+                report.unknown_graphic_uris.push(uri.clone());
+            }
+        }
         report.unknown_elements += self.report.unknown_elements;
         if self.is_hidden() && !options.hidden_slides {
             report.hidden_slides_skipped += 1;

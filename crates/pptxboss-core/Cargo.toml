@@ -18,3 +18,8 @@ memchr = "2"
 
 [dev-dependencies]
 pptxboss-testkit = { path = "../pptxboss-testkit" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "read"
+harness = false

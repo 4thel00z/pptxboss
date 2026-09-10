@@ -1,0 +1,113 @@
+name: release-please
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-lockfile:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo update --workspace
+      - name: Commit Cargo.lock
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git diff --cached --quiet || git commit -m "chore: sync Cargo.lock with the release version"
+          git push
+
+  pypi-wheels:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: ubuntu-latest, target: x86_64 }
+          - { os: macos-latest, target: aarch64 }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: "true"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist
+
+  pypi-sdist:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist
+
+  publish-pypi:
+    needs: [pypi-wheels, pypi-sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  publish-crates:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish --workspace --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -106,6 +106,8 @@ pub struct ExtractReport {
     pub hidden_slides_skipped: u32,
     /// Graphic frames whose content type the reader does not understand.
     pub unknown_graphics: u32,
+    /// The distinct `graphicData` URIs behind `unknown_graphics`.
+    pub unknown_graphic_uris: Vec<String>,
     /// Elements in unknown namespaces skipped inside shape trees.
     pub unknown_elements: u32,
 }
@@ -127,8 +129,9 @@ impl ExtractReport {
         }
         if self.unknown_graphics > 0 {
             lines.push(format!(
-                "{} graphic frame(s) of unknown type skipped",
-                self.unknown_graphics
+                "{} graphic frame(s) of unknown type skipped: {}",
+                self.unknown_graphics,
+                self.unknown_graphic_uris.join(", ")
             ));
         }
         lines
@@ -248,6 +251,7 @@ mod tests {
         let report = ExtractReport {
             failed_slides: vec![(2, "boom".into())],
             unknown_graphics: 3,
+            unknown_graphic_uris: vec!["urn:x".into()],
             ..ExtractReport::default()
         };
         assert!(!report.is_complete());
@@ -255,7 +259,7 @@ mod tests {
             report.warnings(),
             vec![
                 "slide 3: unreadable: boom",
-                "3 graphic frame(s) of unknown type skipped"
+                "3 graphic frame(s) of unknown type skipped: urn:x"
             ]
         );
         assert!(ExtractReport {

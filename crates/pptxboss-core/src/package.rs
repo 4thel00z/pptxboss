@@ -39,6 +39,8 @@ pub struct PackageDefects {
     pub content_types_case: Option<String>,
     /// The content types stream could not be parsed.
     pub content_types_error: Option<XmlError>,
+    /// The content types stream could not be decompressed or read.
+    pub content_types_unreadable: Option<String>,
     /// Parts whose names violate the grammar of 6.2.2.2, with the reason.
     pub invalid_names: Vec<(String, PartNameError)>,
     /// Pairs of part names that are equivalent under ASCII case folding (6.2.2.3); the second loses.
@@ -118,7 +120,9 @@ impl Package {
             let key = equivalence_key(&name);
             if let Some(&existing) = index.get(&key) {
                 let existing: &Part = &parts[existing];
-                defects.collisions.push((existing.name.clone(), name));
+                if existing.name != name {
+                    defects.collisions.push((existing.name.clone(), name));
+                }
                 continue;
             }
             index.insert(key, parts.len());
@@ -131,16 +135,19 @@ impl Package {
                 defects.content_types_missing = true;
                 ContentTypes::default()
             }
-            Some(i) => {
-                let bytes = archive.read_to_vec(&archive.entries()[i])?;
-                match ContentTypes::parse(&bytes) {
+            Some(i) => match archive.read_to_vec(&archive.entries()[i]) {
+                Err(err) => {
+                    defects.content_types_unreadable = Some(err.to_string());
+                    ContentTypes::default()
+                }
+                Ok(bytes) => match ContentTypes::parse(&bytes) {
                     Ok(types) => types,
                     Err(err) => {
                         defects.content_types_error = Some(err);
                         ContentTypes::default()
                     }
-                }
-            }
+                },
+            },
         };
 
         let shared = Arc::new(Shared {
