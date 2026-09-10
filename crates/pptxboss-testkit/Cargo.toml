@@ -1,0 +1,12 @@
+[package]
+name = "pptxboss-testkit"
+description = "Test fixtures for pptxboss: builds ZIP packages and PresentationML decks in memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }

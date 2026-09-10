@@ -1,0 +1,9 @@
+/target
+.venv/
+__pycache__/
+.pytest_cache/
+*.so
+dist/
+
+# mdBook build output; the source lives in docs/src.
+docs/book/

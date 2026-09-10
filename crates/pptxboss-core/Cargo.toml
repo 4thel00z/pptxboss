@@ -1,0 +1,20 @@
+[package]
+name = "pptxboss-core"
+description = "PresentationML (.pptx) reader in pure Rust: ZIP container, OPC package, XML tokenizer and the document model (ECMA-376)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["pptx", "powerpoint", "ecma-376", "ooxml", "parser"]
+categories = ["parser-implementations", "text-processing"]
+
+[dependencies]
+thiserror = "2"
+# Pure-Rust zlib-rs inflate backend: faster than the default miniz_oxide
+# backend and still C-free (keeps the dependency tree free of native code).
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+memchr = "2"
+
+[dev-dependencies]
+pptxboss-testkit = { path = "../pptxboss-testkit" }

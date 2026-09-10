@@ -1,0 +1,23 @@
+[package]
+name = "pptxboss-cli"
+description = "Command-line PresentationML (.pptx) toolkit: inspect, extract text and notes, verify against ECMA-376"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["pptx", "powerpoint", "cli", "ecma-376", "ooxml"]
+categories = ["command-line-utilities", "text-processing"]
+
+[[bin]]
+name = "pptxboss"
+path = "src/main.rs"
+
+[dependencies]
+pptxboss-core = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+pptxboss-testkit = { path = "../pptxboss-testkit" }

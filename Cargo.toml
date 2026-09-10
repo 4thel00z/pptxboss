@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pptxboss-core",
+    "crates/pptxboss-cli",
+    "crates/pptxboss-testkit",
+]
+
+[workspace.package]
+version = "0.1.0" # x-release-please-version
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4thel00z/pptxboss"
+homepage = "https://github.com/4thel00z/pptxboss"
+documentation = "https://docs.rs/pptxboss-core"
+readme = "README.md"
+keywords = ["pptx", "powerpoint", "ecma-376", "ooxml"]
+
+[workspace.dependencies]
+# Inter-crate dependencies carry an explicit `version` (required by
+# `cargo publish`) alongside the local `path`. The markers keep them in
+# lockstep with the workspace version at release time.
+pptxboss-core = { path = "crates/pptxboss-core", version = "0.1.0" } # x-release-please-version
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+# Release builds trade compile time for cross-crate inlining and tighter
+# codegen on the CPU-bound inflate and XML scanning paths. `panic` stays
+# "unwind": the Python extension relies on unwinding to turn Rust panics
+# into Python exceptions rather than aborting the interpreter.
+[profile.release]
+lto = "thin"
+codegen-units = 1

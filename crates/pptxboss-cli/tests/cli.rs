@@ -1,0 +1,110 @@
+use std::path::PathBuf;
+use std::process::Command;
+
+use pptxboss_testkit::{Deck, DeckSlide};
+
+fn fixture(name: &str, deck: &Deck) -> PathBuf {
+    let path =
+        std::env::temp_dir().join(format!("pptxboss-cli-{}-{name}.pptx", std::process::id()));
+    std::fs::write(&path, deck.build()).unwrap();
+    path
+}
+
+fn run(args: &[&str]) -> (i32, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_pptxboss"))
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+fn deck() -> Deck {
+    Deck::new()
+        .slide(
+            DeckSlide::titled("Welcome")
+                .bullet("Point one")
+                .bullet("Point two"),
+        )
+        .slide(DeckSlide::titled("Second").notes("remember this").hidden())
+        .slide(DeckSlide::default())
+}
+
+#[test]
+fn text_prints_slides_separated_by_blank_lines() {
+    let path = fixture("text", &deck());
+    let (code, stdout, stderr) = run(&["text", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "Welcome\nPoint one\nPoint two\n\nSecond\n");
+    assert!(stderr.is_empty());
+    let (_, stdout, _) = run(&[
+        "text",
+        "--notes",
+        "--headings",
+        "--skip-hidden",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        stdout,
+        "--- slide 1 ---\nWelcome\nPoint one\nPoint two\n\n--- slide 2 ---\n\n--- slide 3 ---\n"
+    );
+    let (_, stdout, _) = run(&["text", "--notes", path.to_str().unwrap()]);
+    assert_eq!(
+        stdout,
+        "Welcome\nPoint one\nPoint two\n\nSecond\nremember this\n"
+    );
+    let (_, stdout, _) = run(&["text", "--json", path.to_str().unwrap()]);
+    assert_eq!(
+        stdout.trim(),
+        r#"[{"number":1,"text":"Welcome\nPoint one\nPoint two"},{"number":2,"text":"Second"},{"number":3,"text":""}]"#
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn info_summarizes_the_deck() {
+    let path = fixture("info", &deck());
+    let (code, stdout, _) = run(&["info", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("slides:       3"));
+    assert!(stdout.contains("13.33 x 7.50 in"));
+    assert!(stdout.contains("   1  Welcome"));
+    assert!(stdout.contains("   2  Second [hidden, notes]"));
+    assert!(stdout.contains("   3  (no title)"));
+    let (_, stdout, _) = run(&["info", "--json", path.to_str().unwrap()]);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["slides"], 3);
+    assert_eq!(value["slide_list"][1]["hidden"], true);
+    assert_eq!(value["slide_list"][1]["has_notes"], true);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn unreadable_input_exits_with_code_one() {
+    let path = std::env::temp_dir().join(format!("pptxboss-cli-{}-junk.pptx", std::process::id()));
+    std::fs::write(&path, b"not a package").unwrap();
+    let (code, stdout, stderr) = run(&["text", path.to_str().unwrap()]);
+    assert_eq!(code, 1);
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("not a zip archive"));
+    let (code, _, stderr) = run(&["info", "/nonexistent/file.pptx"]);
+    assert_eq!(code, 1);
+    assert!(stderr.starts_with("error: "));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn a_broken_slide_is_a_warning_not_a_failure() {
+    let path = fixture(
+        "broken",
+        &deck().with_part("ppt/slides/slide1.xml", b"<p:sld"),
+    );
+    let (code, stdout, stderr) = run(&["text", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Second\n");
+    assert!(stderr.starts_with("warning: slide 1: unreadable"));
+    std::fs::remove_file(path).unwrap();
+}
