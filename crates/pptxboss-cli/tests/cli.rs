@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use pptxboss_testkit::{Deck, DeckSlide};
+use pptxboss_testkit::{Deck, DeckSlide, PptDeck, PptSlide};
 
 fn fixture(name: &str, deck: &Deck) -> PathBuf {
     let path =
@@ -231,4 +231,71 @@ fn legacy_ppt_files_read_and_check_refuses_them() {
     let (code, _, stderr) = run(&["check", path.to_str().unwrap()]);
     assert_eq!(code, 2);
     assert!(stderr.contains("compound file"), "{stderr}");
+}
+
+#[test]
+fn slides_option_picks_slides_in_the_written_order() {
+    let path = fixture("slides", &deck());
+    let file = path.to_str().unwrap();
+    let (code, stdout, stderr) = run(&["text", "--slides", "3,1", "--headings", file]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        "--- slide 3 ---\n\n--- slide 1 ---\nWelcome\nPoint one\nPoint two\n"
+    );
+    let (_, stdout, _) = run(&["text", "--slides", "2-3", "--json", file]);
+    assert_eq!(
+        stdout.trim(),
+        r#"[{"number":2,"text":"Second"},{"number":3,"text":""}]"#
+    );
+    let (_, stdout, _) = run(&["text", "--slides", "2", file]);
+    assert_eq!(stdout, "Second\n");
+    let (code, stdout, _) = run(&["markdown", "--slides", "2,1", file]);
+    assert_eq!(code, 0);
+    assert!(stdout.starts_with("## Second\n"), "{stdout}");
+    assert!(stdout.contains("\n\n---\n\n## Welcome\n"), "{stdout}");
+    let (code, stdout, _) = run(&["info", "--slides", "3,2", file]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("slides:       3"));
+    assert!(!stdout.contains("   1  Welcome"));
+    let third = stdout.find("   3  (no title)").unwrap();
+    let second = stdout.find("   2  Second [hidden, notes]").unwrap();
+    assert!(third < second, "{stdout}");
+    let (code, stdout, stderr) = run(&["text", "--slides", "9", file]);
+    assert_eq!(code, 2);
+    assert!(stdout.is_empty());
+    assert_eq!(
+        stderr,
+        "error: --slides 9: slide 9 out of range (deck has 3 slides)\n"
+    );
+    let (code, _, stderr) = run(&["markdown", "--slides", "0", file]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("slide 0 does not exist"));
+    let (code, _, stderr) = run(&["info", "--slides", "2-1", file]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("ranges are low-high"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn slides_option_works_on_a_legacy_deck() {
+    let path = std::env::temp_dir().join(format!("pptxboss-cli-{}-legacy.ppt", std::process::id()));
+    let deck = PptDeck::new()
+        .slide(PptSlide::titled("Legacy one").bullet("a"))
+        .slide(PptSlide::titled("Legacy two").bullet("b"))
+        .slide(PptSlide::titled("Legacy three"));
+    std::fs::write(&path, deck.build()).unwrap();
+    let (code, stdout, stderr) = run(&[
+        "text",
+        "--slides",
+        "3,1",
+        "--headings",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        "--- slide 3 ---\nLegacy three\n\n--- slide 1 ---\nLegacy one\na\n"
+    );
+    std::fs::remove_file(path).unwrap();
 }

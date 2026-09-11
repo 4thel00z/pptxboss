@@ -27,6 +27,7 @@ pptxboss info --json deck.pptx
 pptxboss text deck.pptx                 # slide text; slides separated by a blank line
 pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}]
+pptxboss text --slides 2-4,7 deck.pptx  # only those slides, in that order; also on info and markdown
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number placeholders
 pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
 pptxboss text --no-charts --no-diagrams deck.pptx   # slide text without chart data or SmartArt

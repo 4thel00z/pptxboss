@@ -20,6 +20,7 @@ pptxboss text --notes deck.pptx         # speaker notes after each slide
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number text
 pptxboss text --skip-hidden deck.pptx   # leave out slides marked hidden
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}, ...]
+pptxboss text --slides 2-4,7 deck.pptx  # only those slides, in that order
 ```
 
 Anything the reader skipped is printed to stderr as `warning:` lines; the
@@ -51,7 +52,9 @@ for warning in report.warnings() {
 
 `Document::map_slides` runs a closure over every slide across the available
 cores, or across the cap set with `Document::with_threads`; `slide_texts`
-and `text_reporting` are built on it.
+and `text_reporting` are built on it. `map_slides_at`, `slide_texts_at`
+and `markdown_at` take a list of zero-based indices instead and keep the
+written order, which is what `--slides` uses.
 
 ## Lenient semantics and reporting
 

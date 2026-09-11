@@ -6,8 +6,9 @@ use pptxboss_core::{Document, MarkdownOptions};
 
 use crate::{warn_all, Failure};
 
-pub fn run(doc: &Document, options: &MarkdownOptions) -> Result<(), Failure> {
-    let (markdown, report) = doc.markdown(options);
+/// Prints the slides at `indices` (zero-based, in the written order) as Markdown.
+pub fn run(doc: &Document, indices: &[usize], options: &MarkdownOptions) -> Result<(), Failure> {
+    let (markdown, report) = doc.markdown_at(indices, options);
     let mut out = std::io::stdout().lock();
     out.write_all(markdown.as_bytes())?;
     drop(out);

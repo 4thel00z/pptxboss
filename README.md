@@ -85,6 +85,7 @@ pptxboss text --notes --headings deck.pptx
 pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
 pptxboss markdown --notes deck.pptx # the deck as Markdown, notes as block quotes
 pptxboss text --json deck.pptx      # [{"number": 1, "text": "..."}, ...]
+pptxboss text --slides 2-4,7 deck.pptx  # only those slides, in that order; also on info and markdown
 pptxboss text --threads 1 deck.pptx # cap the worker threads (default: every core)
 pptxboss check deck.pptx            # verify against ECMA-376; exit 1 on errors
 pptxboss check --json --quiet deck.pptx

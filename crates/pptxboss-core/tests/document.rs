@@ -1,5 +1,5 @@
 use pptxboss_core::document::Located;
-use pptxboss_core::{Content, Document, Error, TextOptions};
+use pptxboss_core::{Content, Document, Error, MarkdownOptions, TextOptions};
 use pptxboss_testkit::{Deck, DeckSlide, PptDeck, PptSlide, ZipBuilder};
 
 const PNG: &[u8] = &[
@@ -630,4 +630,41 @@ fn compound_files_that_are_not_presentations_are_refused_with_a_reason() {
         Document::load(encrypted),
         Err(Error::Encrypted(_))
     ));
+}
+
+#[test]
+fn slides_at_indices_come_back_in_the_written_order() {
+    let mut deck = Deck::new();
+    for i in 0..40 {
+        deck = deck.slide(DeckSlide::titled(&format!("Slide {i}")).bullet("x"));
+    }
+    let doc = Document::load(deck.build()).unwrap();
+    let picked: Vec<usize> = (0..40).rev().step_by(3).collect();
+    let titles = doc.map_slides_at(&picked, |slide| slide.unwrap().title().unwrap());
+    let expected: Vec<String> = picked.iter().map(|i| format!("Slide {i}")).collect();
+    assert_eq!(titles, expected);
+    let (texts, report) = doc.slide_texts_at(&[2, 0, 2], &TextOptions::default());
+    assert_eq!(texts, ["Slide 2\nx", "Slide 0\nx", "Slide 2\nx"]);
+    assert!(report.is_complete());
+    let (markdown, _) = doc.markdown_at(&[1, 0], &MarkdownOptions::default());
+    assert!(markdown.starts_with("## Slide 1\n"), "{markdown}");
+    assert!(markdown.contains("\n\n---\n\n## Slide 0\n"), "{markdown}");
+    assert_eq!(doc.map_slides_at(&[40], |slide| slide.is_err()), [true]);
+    assert!(doc.map_slides_at(&[], |_| ()).is_empty());
+}
+
+#[test]
+fn a_selected_broken_slide_is_reported_under_its_own_number() {
+    let doc = Document::load(
+        deck()
+            .with_part("ppt/slides/slide3.xml", b"<p:sld xmlns:p=\"x\"><p:cSld>")
+            .build(),
+    )
+    .unwrap();
+    let (texts, report) = doc.slide_texts_at(&[2, 1], &TextOptions::default());
+    assert_eq!(texts, ["", "Second slide\nOne"]);
+    assert_eq!(report.failed_slides[0].0, 2);
+    assert!(report.warnings()[0].starts_with("slide 3: unreadable"));
+    let (_, report) = doc.markdown_at(&[2], &MarkdownOptions::default());
+    assert!(report.warnings()[0].starts_with("slide 3: unreadable"));
 }

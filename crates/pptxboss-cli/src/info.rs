@@ -59,9 +59,9 @@ struct Info {
     slide_list: Vec<SlideInfo>,
 }
 
-fn collect(doc: &Document, file: &Path) -> Info {
+fn collect(doc: &Document, file: &Path, indices: &[usize]) -> Info {
     let presentation = doc.presentation();
-    let slide_list = doc.map_slides(|slide| match slide {
+    let slide_list = doc.map_slides_at(indices, |slide| match slide {
         Ok(slide) => {
             let shapes: Vec<_> = slide.content.walk().collect();
             SlideInfo {
@@ -101,10 +101,10 @@ fn collect(doc: &Document, file: &Path) -> Info {
             error: Some(err.to_string()),
         },
     });
-    let slide_list = slide_list
-        .into_iter()
-        .enumerate()
-        .map(|(index, mut info)| {
+    let slide_list = indices
+        .iter()
+        .zip(slide_list)
+        .map(|(&index, mut info)| {
             if info.number == 0 {
                 info.number = index + 1;
                 info.part = doc.slide_refs()[index].part.clone();
@@ -170,8 +170,10 @@ fn number_ranges(numbers: &[usize]) -> String {
     ranges.join(", ")
 }
 
-pub fn run(doc: &Document, file: &Path, json: bool) -> Result<(), Failure> {
-    let info = collect(doc, file);
+/// Prints the summary with one line per slide at `indices` (zero-based, in
+/// the written order); the counts describe the whole deck.
+pub fn run(doc: &Document, file: &Path, indices: &[usize], json: bool) -> Result<(), Failure> {
+    let info = collect(doc, file, indices);
     let mut out = std::io::stdout().lock();
     if json {
         serde_json::to_writer_pretty(&mut out, &info).map_err(|err| Failure {

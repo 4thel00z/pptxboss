@@ -10,7 +10,15 @@ used to parse slides; the default is every core, or the value of
 `PPTXBOSS_THREADS` when that is set. `--threads 1` keeps everything on the
 calling thread, which is also the default for a legacy `.ppt` deck.
 
-## `pptxboss info FILE [--json]`
+`--slides RANGE` on `info`, `text` and `markdown` picks slides by their
+one-based number: a comma-separated list of numbers and low-high ranges
+such as `1-3,7`, printed in the written order, duplicates kept. `info`
+still reports the whole deck's counts and lists only the picked slides;
+`text --json` and `--headings` carry the real slide numbers. A number the
+deck does not have, or `0`, is a usage error with exit code 2:
+`error: --slides 9: slide 9 out of range (deck has 3 slides)`.
+
+## `pptxboss info FILE [--json] [--slides RANGE]`
 
 Format (`pptx` or `ppt`), slide count, presentation part, slide size in EMU
 and inches with its declared type, master count, part count, the core
@@ -21,7 +29,7 @@ slide: number, title or `(no title)`, and flags among `hidden`, `notes`,
 `pictures`, `tables`, `objects`, `comments`. A slide that fails to parse
 shows `(unreadable: reason)`.
 
-## `pptxboss text FILE [--notes] [--comments] [--alt-text] [--no-charts] [--no-diagrams] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
+## `pptxboss text FILE [--slides RANGE] [--notes] [--comments] [--alt-text] [--no-charts] [--no-diagrams] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
 
 Slide text, slides separated by a blank line; empty slides are skipped
 unless `--headings` or `--json` is given. `--comments` appends
@@ -30,7 +38,7 @@ and notes; `--alt-text` adds the alternative text of pictures and other
 shapes that have no text. Chart data and diagram text are included unless
 `--no-charts` or `--no-diagrams` is given.
 
-## `pptxboss markdown FILE [--notes] [--comments] [--skip-hidden] [--hidden-shapes] [--furniture] [--no-headings] [--no-images]`
+## `pptxboss markdown FILE [--slides RANGE] [--notes] [--comments] [--skip-hidden] [--hidden-shapes] [--furniture] [--no-headings] [--no-images]`
 
 The deck as Markdown on stdout: a `## Title` heading per slide, bullets,
 paragraphs, GFM tables, images, chart tables and diagram outlines, slides

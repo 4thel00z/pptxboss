@@ -512,10 +512,26 @@ impl Document {
         T: Send,
         F: Fn(Result<Slide<'_>>) -> T + Sync,
     {
-        let count = self.slide_count();
+        self.map_slides_at(&self.all_slides(), f)
+    }
+
+    /// Every slide index, in presentation order.
+    pub fn all_slides(&self) -> Vec<usize> {
+        (0..self.slide_count()).collect()
+    }
+
+    /// Applies `f` to the slides at `indices` (zero-based), in the written
+    /// order, with the same worker spread as [`Document::map_slides`]. An
+    /// index past the last slide reaches `f` as an error.
+    pub fn map_slides_at<T, F>(&self, indices: &[usize], f: F) -> Vec<T>
+    where
+        T: Send,
+        F: Fn(Result<Slide<'_>>) -> T + Sync,
+    {
+        let count = indices.len();
         let workers = self.worker_count(count);
         if workers <= 1 {
-            return (0..count).map(|index| f(self.slide(index))).collect();
+            return indices.iter().map(|&index| f(self.slide(index))).collect();
         }
         let seed = self.seed();
         let next = AtomicUsize::new(0);
@@ -526,11 +542,11 @@ impl Document {
                         let doc = Document::from_seed(seed.clone());
                         let mut mine = Vec::new();
                         loop {
-                            let index = next.fetch_add(1, Ordering::Relaxed);
-                            if index >= count {
+                            let position = next.fetch_add(1, Ordering::Relaxed);
+                            if position >= count {
                                 return mine;
                             }
-                            mine.push((index, f(doc.slide(index))));
+                            mine.push((position, f(doc.slide(indices[position]))));
                         }
                     })
                 })
@@ -543,13 +559,24 @@ impl Document {
                 })
                 .collect()
         });
-        results.sort_by_key(|(index, _)| *index);
+        results.sort_by_key(|(position, _)| *position);
         results.into_iter().map(|(_, value)| value).collect()
     }
 
     /// The text of every slide, in order, plus what was left out.
     pub fn slide_texts(&self, options: &TextOptions) -> (Vec<String>, ExtractReport) {
-        let results = self.map_slides(|slide| match slide {
+        self.slide_texts_at(&self.all_slides(), options)
+    }
+
+    /// The text of the slides at `indices` (zero-based), in the written
+    /// order, plus what was left out; failures are reported under the real
+    /// slide number.
+    pub fn slide_texts_at(
+        &self,
+        indices: &[usize],
+        options: &TextOptions,
+    ) -> (Vec<String>, ExtractReport) {
+        let results = self.map_slides_at(indices, |slide| match slide {
             Ok(slide) => {
                 let mut report = ExtractReport::default();
                 let text = slide.text_reporting(options, &mut report);
@@ -563,7 +590,7 @@ impl Document {
         });
         let mut report = ExtractReport::default();
         let mut texts = Vec::with_capacity(results.len());
-        for (index, (text, slide_report)) in results.into_iter().enumerate() {
+        for (&index, (text, slide_report)) in indices.iter().zip(results) {
             report.merge(index, slide_report);
             texts.push(text);
         }

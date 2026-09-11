@@ -13,19 +13,21 @@ struct SlideText<'a> {
     text: &'a str,
 }
 
+/// Prints the slides at `indices` (zero-based, in the written order).
 pub fn run(
     doc: &Document,
+    indices: &[usize],
     options: &TextOptions,
     headings: bool,
     json: bool,
 ) -> Result<(), Failure> {
-    let (texts, report): (Vec<String>, ExtractReport) = doc.slide_texts(options);
+    let (texts, report): (Vec<String>, ExtractReport) = doc.slide_texts_at(indices, options);
     let mut out = std::io::stdout().lock();
     if json {
-        let slides: Vec<SlideText> = texts
+        let slides: Vec<SlideText> = indices
             .iter()
-            .enumerate()
-            .map(|(index, text)| SlideText {
+            .zip(&texts)
+            .map(|(&index, text)| SlideText {
                 number: index + 1,
                 text,
             })
@@ -36,8 +38,8 @@ pub fn run(
         })?;
         writeln!(out)?;
     } else if headings {
-        for (index, text) in texts.iter().enumerate() {
-            if index > 0 {
+        for (position, (&index, text)) in indices.iter().zip(&texts).enumerate() {
+            if position > 0 {
                 writeln!(out)?;
             }
             writeln!(out, "--- slide {} ---", index + 1)?;

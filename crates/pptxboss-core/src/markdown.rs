@@ -44,7 +44,17 @@ impl Default for MarkdownOptions {
 impl Document {
     /// The whole deck as Markdown, slides separated by a rule, with what was skipped.
     pub fn markdown(&self, options: &MarkdownOptions) -> (String, ExtractReport) {
-        let results = self.map_slides(|slide| match slide {
+        self.markdown_at(&self.all_slides(), options)
+    }
+
+    /// The slides at `indices` (zero-based) as Markdown in the written
+    /// order, separated by a rule, with what was skipped.
+    pub fn markdown_at(
+        &self,
+        indices: &[usize],
+        options: &MarkdownOptions,
+    ) -> (String, ExtractReport) {
+        let results = self.map_slides_at(indices, |slide| match slide {
             Ok(slide) => {
                 let mut report = ExtractReport::default();
                 let text = slide.markdown(options, &mut report);
@@ -58,7 +68,7 @@ impl Document {
         });
         let mut report = ExtractReport::default();
         let mut out = String::new();
-        for (index, (text, slide_report)) in results.into_iter().enumerate() {
+        for (&index, (text, slide_report)) in indices.iter().zip(results) {
             report.merge(index, slide_report);
             if text.is_empty() {
                 continue;

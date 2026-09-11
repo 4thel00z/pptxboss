@@ -12,6 +12,7 @@ mod create;
 mod info;
 mod markdown;
 mod skill;
+mod slides;
 mod text;
 
 #[derive(Parser)]
@@ -36,10 +37,16 @@ enum Command {
         /// Emit JSON instead of text.
         #[arg(long)]
         json: bool,
+        /// Which slides to list, e.g. 1-3,7 (default: every slide).
+        #[arg(long, value_name = "RANGE")]
+        slides: Option<String>,
     },
     /// Extract the text of every slide.
     Text {
         file: PathBuf,
+        /// Which slides to extract, e.g. 1-3,7 (default: every slide).
+        #[arg(long, value_name = "RANGE")]
+        slides: Option<String>,
         /// Append each slide's speaker notes after its text.
         #[arg(long)]
         notes: bool,
@@ -74,6 +81,9 @@ enum Command {
     /// Render the deck as Markdown: a heading per slide, bullets, tables, images, charts and diagrams.
     Markdown {
         file: PathBuf,
+        /// Which slides to render, e.g. 1-3,7 (default: every slide).
+        #[arg(long, value_name = "RANGE")]
+        slides: Option<String>,
         /// Speaker notes as a block quote after each slide.
         #[arg(long)]
         notes: bool,
@@ -127,7 +137,9 @@ enum Command {
     Skill(skill::Skill),
 }
 
-/// A failure with the exit code it maps to: 1 for unreadable input or verifier errors, 2 when `check` cannot open its file.
+/// A failure with the exit code it maps to: 1 for unreadable input or
+/// verifier errors, 2 for a `--slides` range the deck does not have and
+/// for `check` when it cannot open its file.
 pub struct Failure {
     pub message: String,
     pub code: u8,
@@ -155,11 +167,13 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let threads = cli.threads.unwrap_or(0);
     let result = match cli.command {
-        Command::Info { file, json } => {
-            open(&file, threads).and_then(|doc| info::run(&doc, &file, json))
-        }
+        Command::Info { file, json, slides } => open(&file, threads).and_then(|doc| {
+            let indices = select(&doc, slides.as_deref())?;
+            info::run(&doc, &file, &indices, json)
+        }),
         Command::Text {
             file,
+            slides,
             notes,
             furniture,
             hidden_shapes,
@@ -182,10 +196,14 @@ fn main() -> ExitCode {
                 diagrams: !no_diagrams,
                 ..TextOptions::default()
             };
-            open(&file, threads).and_then(|doc| text::run(&doc, &options, headings, json))
+            open(&file, threads).and_then(|doc| {
+                let indices = select(&doc, slides.as_deref())?;
+                text::run(&doc, &indices, &options, headings, json)
+            })
         }
         Command::Markdown {
             file,
+            slides,
             notes,
             comments,
             skip_hidden,
@@ -203,7 +221,10 @@ fn main() -> ExitCode {
                 furniture,
                 images: !no_images,
             };
-            open(&file, threads).and_then(|doc| markdown::run(&doc, &options))
+            open(&file, threads).and_then(|doc| {
+                let indices = select(&doc, slides.as_deref())?;
+                markdown::run(&doc, &indices, &options)
+            })
         }
         Command::Check {
             file,
@@ -234,6 +255,18 @@ fn open(file: &PathBuf, threads: usize) -> Result<Document, Failure> {
             message: format!("{}: {err}", file.display()),
             code: 1,
         })
+}
+
+/// The zero-based indices a `--slides RANGE` names, or every slide when
+/// the option is absent; a range the deck does not have is a usage error.
+fn select(doc: &Document, slides: Option<&str>) -> Result<Vec<usize>, Failure> {
+    let Some(spec) = slides else {
+        return Ok(doc.all_slides());
+    };
+    slides::parse_slides(spec, doc.slide_count()).map_err(|message| Failure {
+        message: format!("--slides {spec}: {message}"),
+        code: 2,
+    })
 }
 
 /// Prints report warnings to stderr, one per line.
