@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/4thel00z/pptxboss/compare/v0.2.1...v0.3.0) (2026-09-11)
+
+
+### Features
+
+* **py:** expose the rest of the Rust API to Python ([#4](https://github.com/4thel00z/pptxboss/issues/4)) ([1b6e440](https://github.com/4thel00z/pptxboss/commit/1b6e440bc0229d6faecd5e83034d860cf1c7afc1))
+
 ## [0.2.1](https://github.com/4thel00z/pptxboss/compare/v0.2.0...v0.2.1) (2026-09-11)
 
 
