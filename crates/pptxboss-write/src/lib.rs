@@ -402,7 +402,7 @@ impl Presentation {
         let parts = parts::build(self)?;
         let mut writer = zipw::ZipWriter::new();
         for part in parts {
-            writer.add(&part.name, &part.data, part.compress);
+            writer.add(&part.name, &part.data, part.compress)?;
         }
         Ok(writer.finish())
     }

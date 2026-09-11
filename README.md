@@ -45,11 +45,11 @@ refusing, reporting every skip.
   Real PowerPoint output verifies clean; the rules were calibrated against
   790 public test decks.
 - **Fastest measured**: 934 files/s extracting text over a 631-file
-  public corpus, about 2.5x the next fastest Rust engine and 17x
-  python-pptx, with paragraph-for-paragraph agreement on every gated file
-  ([benchmarks](#benchmarks)).
+  public corpus, about 2.5x the next fastest Rust engine and 17x the
+  most-used Python library, with paragraph-for-paragraph agreement on every
+  gated file ([benchmarks](#benchmarks)).
 - **Reads Strict decks**: the Open XML SDK's Strict-namespace test decks,
-  which python-pptx cannot open, read and verify like any other.
+  which most readers refuse, read and verify like any other.
 
 ## Install
 

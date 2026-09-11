@@ -176,7 +176,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
             &mut xml_parts,
             "ppt/notesMasters/notesMaster1.xml",
             &format!("{CT_PML}notesMaster+xml"),
-            notes_master_xml(presentation.size),
+            notes_master_xml(),
         );
         parts.push(rels_part(
             "ppt/notesMasters/_rels/notesMaster1.xml.rels",
@@ -542,8 +542,7 @@ fn layout_xml(layout: Layout, frames: &Frames) -> String {
     )
 }
 
-fn notes_master_xml(size: SlideSize) -> String {
-    let _ = size;
+fn notes_master_xml() -> String {
     format!(
         r#"{DECL}<p:notesMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>{}{}{}</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>"#,
         group_header(),

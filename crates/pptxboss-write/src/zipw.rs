@@ -2,7 +2,7 @@
 //! stored or deflated entries, fixed timestamps, no data descriptors,
 //! no Zip64, version needed 2.0.
 
-use std::io::Write;
+use std::io::{self, Write};
 
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
@@ -39,14 +39,14 @@ impl ZipWriter {
     }
 
     /// Adds an entry; `compress` selects deflate over stored.
-    pub fn add(&mut self, name: &str, data: &[u8], compress: bool) {
+    pub fn add(&mut self, name: &str, data: &[u8], compress: bool) -> io::Result<()> {
         let payload;
         let (method, body): (u16, &[u8]) = match compress {
             true => {
                 let mut encoder =
                     DeflateEncoder::new(Vec::with_capacity(data.len() / 2), Compression::default());
-                let _ = encoder.write_all(data);
-                payload = encoder.finish().unwrap_or_default();
+                encoder.write_all(data)?;
+                payload = encoder.finish()?;
                 (8, &payload)
             }
             false => (0, data),
@@ -74,6 +74,7 @@ impl ZipWriter {
             uncompressed: data.len() as u32,
             offset,
         });
+        Ok(())
     }
 
     pub fn finish(mut self) -> Vec<u8> {
@@ -134,8 +135,8 @@ mod tests {
     fn written_archives_read_back_and_are_deterministic() {
         let build = || {
             let mut writer = ZipWriter::new();
-            writer.add("a.xml", b"<a>hello</a>", true);
-            writer.add("b.bin", &[1, 2, 3], false);
+            writer.add("a.xml", b"<a>hello</a>", true).unwrap();
+            writer.add("b.bin", &[1, 2, 3], false).unwrap();
             writer.finish()
         };
         let first = build();

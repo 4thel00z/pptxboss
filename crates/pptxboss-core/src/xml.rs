@@ -690,19 +690,15 @@ impl<'a> Reader<'a> {
         }
         let name_end = i;
         if !self.strict {
-            if let Some(rel) = memchr(b'>', &data[name_end..]) {
+            if let Some(rel) = first_unquoted_gt(&data[name_end..]) {
                 let gt = name_end + rel;
-                let between = &data[name_end..gt];
-                let quotes = between.iter().filter(|&&b| b == b'"' || b == b'\'').count();
-                if quotes % 2 == 0 {
-                    self.pos = gt + 1;
-                    let self_closing = gt > name_end && data[gt - 1] == b'/';
-                    let attrs_end = match self_closing {
-                        true => gt - 1,
-                        false => gt,
-                    };
-                    return Ok((name_end, attrs_end, self_closing, colon));
-                }
+                self.pos = gt + 1;
+                let self_closing = gt > name_end && data[gt - 1] == b'/';
+                let attrs_end = match self_closing {
+                    true => gt - 1,
+                    false => gt,
+                };
+                return Ok((name_end, attrs_end, self_closing, colon));
             }
         }
         loop {
@@ -1025,6 +1021,21 @@ fn next_raw_attr(raw: &[u8], mut pos: usize) -> Option<(&[u8], &[u8], usize)> {
     Some((name, &raw[v + 1..close], close + 1))
 }
 
+/// The offset of the first `>` outside a quoted attribute value, or None
+/// when a quote is left open before any such `>`.
+fn first_unquoted_gt(data: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    loop {
+        let at = i + memchr3(b'>', b'"', b'\'', &data[i..])?;
+        let byte = data[at];
+        if byte == b'>' {
+            return Some(at);
+        }
+        let close = memchr(byte, &data[at + 1..])?;
+        i = at + 1 + close + 1;
+    }
+}
+
 /// Bytes that end an element name inside a start tag.
 static NAME_END: [bool; 256] = {
     let mut table = [false; 256];
@@ -1286,6 +1297,35 @@ mod tests {
         assert_eq!(attrs[0].name.ns, Ns::None);
         assert_eq!(attrs[0].name.local, b"Extension");
         assert_eq!(attrs[1].raw_value, b"application/xml");
+    }
+
+    #[test]
+    fn lenient_start_tags_keep_mixed_quotes_and_quoted_angle_brackets() {
+        let data = br#"<a x="it's" y=">" z='say "hi" &gt; there'>text</a>"#;
+        let mut reader = Reader::new(data);
+        let Event::Start(start) = reader.next().unwrap() else {
+            panic!()
+        };
+        assert!(!start.self_closing);
+        let attrs: Vec<_> = reader.attrs(&start).collect();
+        assert_eq!(attrs.len(), 3);
+        assert_eq!(attrs[0].raw_value, b"it's");
+        assert_eq!(attrs[1].raw_value, b">");
+        assert_eq!(attrs[2].raw_value, br#"say "hi" &gt; there"#);
+        let Event::Text { raw, .. } = reader.next().unwrap() else {
+            panic!()
+        };
+        assert_eq!(raw, b"text");
+        assert!(matches!(reader.next().unwrap(), Event::End(_)));
+        let mut reader = Reader::new(br#"<a x="it's" y=">"/>"#);
+        let Event::Start(start) = reader.next().unwrap() else {
+            panic!()
+        };
+        assert!(start.self_closing);
+        assert_eq!(reader.attrs(&start).count(), 2);
+        assert!(matches!(reader.next().unwrap(), Event::End(_)));
+        assert!(matches!(reader.next().unwrap(), Event::Eof));
+        assert_eq!(first_unquoted_gt(br#"x="unclosed>"#), None);
     }
 
     #[test]

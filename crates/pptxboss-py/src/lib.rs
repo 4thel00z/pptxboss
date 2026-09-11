@@ -474,7 +474,6 @@ impl Slide {
     /// The bytes of an image part referenced from this slide.
     fn image_bytes<'py>(&self, py: Python<'py>, image: &Image) -> PyResult<Bound<'py, PyBytes>> {
         let seed = self.seed.clone();
-        let index = self.index;
         let part = image.part.clone().ok_or_else(|| {
             pptx_err(format!(
                 "image {} is not stored in the package",
@@ -486,7 +485,6 @@ impl Slide {
                 let doc = CoreDocument::from_seed(seed);
                 let mut out = Vec::new();
                 doc.package().read_part_into(&part, &mut out)?;
-                let _ = index;
                 Ok::<_, pptxboss_core::Error>(out)
             })
             .map_err(pptx_err)?;

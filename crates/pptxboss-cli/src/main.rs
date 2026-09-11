@@ -86,7 +86,7 @@ enum Command {
     Skill(skill::Skill),
 }
 
-/// A failure with the exit code it maps to: 1 for unreadable input, 2 for bad usage.
+/// A failure with the exit code it maps to: 1 for unreadable input or verifier errors, 2 when `check` cannot open its file.
 pub struct Failure {
     pub message: String,
     pub code: u8,

@@ -389,7 +389,6 @@ fn check_presentation(package: &Package, sink: &mut Sink<'_>) {
             "sldMasterId",
             &location,
             sink,
-            &mut seen_master_ids,
         );
     }
     if let Some(rel_id) = &presentation.notes_master {
@@ -403,7 +402,6 @@ fn check_presentation(package: &Package, sink: &mut Sink<'_>) {
             "notesMasterId",
             "notesMasterIdLst",
             sink,
-            &mut HashMap::new(),
         );
     }
     if let Some(rel_id) = &presentation.handout_master {
@@ -417,7 +415,6 @@ fn check_presentation(package: &Package, sink: &mut Sink<'_>) {
             "handoutMasterId",
             "handoutMasterIdLst",
             sink,
-            &mut HashMap::new(),
         );
     }
     let notes_master_rels = rels
@@ -446,7 +443,6 @@ fn check_typed_target(
     element: &str,
     location: &str,
     sink: &mut Sink<'_>,
-    _seen: &mut HashMap<u32, usize>,
 ) {
     match rels.get(rel_id) {
         None => sink.push(
