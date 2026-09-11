@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/4thel00z/pptxboss/compare/v0.2.0...v0.2.1) (2026-09-11)
+
+
+### Documentation
+
+* plain wording in the README and the book, terminal screenshots ([#2](https://github.com/4thel00z/pptxboss/issues/2)) ([f82b048](https://github.com/4thel00z/pptxboss/commit/f82b04890b885c72f1d5bd5d62a3799ceb4795b5))
+
 ## [0.2.0](https://github.com/4thel00z/pptxboss/compare/v0.1.0...v0.2.0) (2026-09-11)
 
 
