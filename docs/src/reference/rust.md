@@ -12,9 +12,9 @@ handle from which any thread rebuilds a `Document` over the same archive
 with private caches. `Package` works the same way. `Document::map_slides`
 spreads slides over every core unless `Document::with_threads` (or
 `set_threads`, or the `PPTXBOSS_THREADS` variable) caps the workers; the
-seed carries the cap. A legacy `.ppt` deck stays on the calling thread
-unless a cap is set explicitly, because its slides are too cheap to
-spread.
+seed keeps the cap. A legacy `.ppt` deck stays on the calling thread
+unless a cap is set explicitly, because spreading them costs more than
+it saves.
 
 Every error type is a `thiserror` enum per crate: `pptxboss_core::Error`,
 `pptxboss_write::Error`.

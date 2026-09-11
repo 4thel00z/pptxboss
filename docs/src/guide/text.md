@@ -56,9 +56,9 @@ and `text_reporting` are built on it. `map_slides_at`, `slide_texts_at`
 and `markdown_at` take a list of zero-based indices instead and keep the
 written order, which is what `--slides` uses.
 
-## Lenient semantics and reporting
+## What is skipped, and how it is reported
 
-A slide whose part is missing or malformed contributes an empty string and
+A slide whose part is missing or malformed gives an empty string and
 an entry in `ExtractReport::failed_slides`. Graphic frames whose type the
 reader does not know (anything but tables, charts, diagrams and embedded
 objects) are counted in `unknown_graphics` with their URI. Elements in
@@ -76,11 +76,11 @@ the reader decodes.
 
 ## Charts and diagrams
 
-A chart contributes its title and a table of its cached data: a header of
+A chart gives its title and a table of its cached data: a header of
 series names, then one row per category with each series' value, cells
 separated like table cells. Series with differing categories (scatter and
-bubble charts) become one row each. A diagram (SmartArt) contributes one
-line per node in tree order. Both are on by default and switched off with
+bubble charts) become one row each. A diagram (SmartArt) gives one line
+per node in tree order. Both are on by default and switched off with
 `TextOptions::charts` and `TextOptions::diagrams` (`--no-charts`,
 `--no-diagrams`). `Slide::charts` and `Slide::diagrams` return the data
 structured.

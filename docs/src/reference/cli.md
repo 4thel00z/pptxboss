@@ -14,7 +14,7 @@ calling thread, which is also the default for a legacy `.ppt` deck.
 one-based number: a comma-separated list of numbers and low-high ranges
 such as `1-3,7`, printed in the written order, duplicates kept. `info`
 still reports the whole deck's counts and lists only the picked slides;
-`text --json` and `--headings` carry the real slide numbers. A number the
+`text --json` and `--headings` use the real slide numbers. A number the
 deck does not have, or `0`, is a usage error with exit code 2:
 `error: --slides 9: slide 9 out of range (deck has 3 slides)`.
 

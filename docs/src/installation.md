@@ -20,9 +20,9 @@ cargo install pptxboss-cli
 
 ```toml
 [dependencies]
-pptxboss-core = "0.1"    # reading
-pptxboss-check = "0.1"   # verifying
-pptxboss-write = "0.1"   # creating
+pptxboss-core = "0.2"    # reading
+pptxboss-check = "0.2"   # verifying
+pptxboss-write = "0.2"   # creating
 ```
 
 ## From source
