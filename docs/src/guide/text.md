@@ -33,7 +33,9 @@ doc = pptxboss.Document("deck.pptx")
 doc.text()                                  # whole deck
 doc.text(notes=True, hidden_slides=False)
 doc.slide_texts()                           # one string per slide, in parallel
+doc.slide_texts(indexes=[2, 0])             # chosen slides, zero-based, in that order
 text, warnings = doc.text_reporting()       # what was skipped, one line each
+text, report = doc.extract(indexes=[0])     # the same with an ExtractReport
 doc[3].text(furniture=True)
 doc[3].paragraphs()                         # every paragraph incl. table cells
 ```

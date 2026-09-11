@@ -27,6 +27,15 @@ for rows in slide.tables():
         print(row)          # cell texts, merged-away cells omitted
 ```
 
+`tables()` gives cell text only. Spans and merges are on the table shape:
+
+```python
+for shape in slide.shapes():
+    if shape.kind == "table":
+        for row in shape.table.rows:
+            [(cell.text, cell.grid_span, cell.row_span, cell.is_origin) for cell in row.cells]
+```
+
 In Rust a table is `Content::Table(Table)` with `column_widths` and `rows`
 of `Cell { body, grid_span, row_span, h_merge, v_merge }`. `Cell::is_origin`
 is false for cells merged into another.
@@ -41,6 +50,10 @@ for shape in slide.shapes():
     shape.frame         # (x, y, cx, cy) in EMU when the shape has a transform
     shape.children      # for groups
 ```
+
+A text shape's `paragraphs` holds `Paragraph` objects with their `runs`,
+each with `bold`, `italic`, `size`, `hyperlink` and the other run
+properties as written; `Slide.paragraphs()` stays a flat list of strings.
 
 In Rust, `SlideContent::shapes` holds the top-level `Shape` values and
 `SlideContent::walk()` yields every shape in document order, descending

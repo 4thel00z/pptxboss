@@ -72,6 +72,8 @@ for slide in doc:                              # lazy, parsed on demand
     slide.tables()                             # list of rows of cell texts
     for shape in slide.shapes():               # kind: text|picture|table|group|chart|diagram|ole|...
         shape.text; shape.placeholder; shape.frame; shape.children
+        shape.paragraphs                       # Paragraph(runs=[Run(bold, italic, size, hyperlink, ...)]) for text shapes
+        shape.table                            # Table(rows=[Row(cells=[Cell(text, grid_span, row_span, is_origin)])]) for tables
     for image in slide.images():               # pictures with their image parts
         data = slide.image_bytes(image); image.content_type
     slide.hyperlink("rId3")                    # URL or internal part for a relationship id
@@ -82,11 +84,17 @@ doc.sections()                                 # Section(name, slides) with zero
 doc.text(notes=True, comments=True, alt_text=True)  # whole deck, blank line between slides
 doc.markdown(notes=True, comments=True)        # whole deck as Markdown, slides separated by ---
 text, warnings = doc.text_reporting()          # warnings: what the reader skipped
+text, report = doc.extract(indexes=[0, 2])     # chosen slides; ExtractReport(failed_slides, is_complete, warnings, ...)
 doc.slide_texts(hidden_slides=False)
+doc.slide_texts(indexes=[2, 0]); doc.markdown(indexes=[1])  # zero-based, negatives from the end, written order
+doc.defects; doc.presentation(); doc.comment_authors()      # how slides were found; sldId/master lists; authors
+package = doc.package()                        # raw parts, content types, relationships (or Package(path))
+package.parts(); package.read("/ppt/presentation.xml"); package.rels("/ppt/presentation.xml"); package.defects
 
 findings = pptxboss.check("deck.pptx")         # verifier; most severe first
 for f in findings:
     f.severity, f.code, f.clause, f.part, f.message
+report = pptxboss.check_report("deck.pptx")    # .findings, .parts_checked, .truncated, .errors, .is_clean, .codes
 pptxboss.rules()                               # every rule with code, severity, clause, summary
 ```
 
@@ -113,10 +121,10 @@ caps it.
   the verifier covers ECMA-376 packages only. Password-protected files of
   either format are refused, not decrypted.
 - `check` exit code 1 means errors were found; warnings alone exit 0.
-  Real PowerPoint output verifies clean; files from other writers often
-  carry duplicate shape ids (PML019) or directory entries (ZIP006).
-- Tables in extracted text use tabs between cells; pass `slide.tables()`
-  for structured rows.
+  Decks saved by PowerPoint pass with no findings; files from other writers
+  often have duplicate shape ids (PML019) or directory entries (ZIP006).
+- Tables in extracted text use tabs between cells; `slide.tables()` gives
+  rows of cell text and `shape.table` the grid with spans and merges.
 - `create` writes deterministic files: the same input gives identical bytes.
 
 ## Links

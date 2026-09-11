@@ -26,7 +26,15 @@ create_exception!(
     "Raised for any PowerPoint processing error (bad data, unreadable parts, I/O)."
 );
 
+mod model;
+mod package;
 mod write;
+
+use model::{
+    paragraphs_from_body, CommentAuthor, DocumentDefects, ExtractReport, Paragraph, Presentation,
+    Table,
+};
+use package::Package;
 
 pub(crate) fn pptx_err(err: impl std::fmt::Display) -> PyErr {
     PptxError::new_err(err.to_string())
@@ -78,6 +86,27 @@ impl Document {
         }
         Ok(resolved as usize)
     }
+
+    fn resolve_indexes(&self, indexes: Option<Vec<isize>>) -> PyResult<Option<Vec<usize>>> {
+        indexes
+            .map(|indexes| {
+                indexes
+                    .into_iter()
+                    .map(|index| self.resolve_index(index))
+                    .collect()
+            })
+            .transpose()
+    }
+}
+
+/// Slide texts joined the way `Document::text_reporting` joins them.
+fn join_slide_texts(texts: &[String]) -> String {
+    texts
+        .iter()
+        .filter(|text| !text.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[pymethods]
@@ -286,12 +315,15 @@ impl Document {
         (text, report.warnings())
     }
 
-    /// One string per slide, in order, extracted in parallel.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    /// The text plus a structured report of what was skipped. `indexes`
+    /// picks slides by zero-based index (negatives count from the end) in
+    /// the written order.
+    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
     #[allow(clippy::too_many_arguments)]
-    fn slide_texts(
+    fn extract(
         &self,
         py: Python<'_>,
+        indexes: Option<Vec<isize>>,
         notes: bool,
         furniture: bool,
         hidden_shapes: bool,
@@ -300,7 +332,7 @@ impl Document {
         comments: bool,
         charts: bool,
         diagrams: bool,
-    ) -> Vec<String> {
+    ) -> PyResult<(String, ExtractReport)> {
         let mut options = options(
             notes,
             furniture,
@@ -311,8 +343,58 @@ impl Document {
         );
         options.charts = charts;
         options.diagrams = diagrams;
+        let indexes = self.resolve_indexes(indexes)?;
         let seed = self.seed.clone();
-        py.allow_threads(|| CoreDocument::from_seed(seed).slide_texts(&options).0)
+        let (text, report) = py.allow_threads(|| {
+            let doc = CoreDocument::from_seed(seed);
+            match indexes {
+                None => doc.text_reporting(&options),
+                Some(indexes) => {
+                    let (texts, report) = doc.slide_texts_at(&indexes, &options);
+                    (join_slide_texts(&texts), report)
+                }
+            }
+        });
+        Ok((text, ExtractReport::from_core(report)))
+    }
+
+    /// One string per slide, in order, extracted in parallel. `indexes`
+    /// picks slides by zero-based index (negatives count from the end) in
+    /// the written order.
+    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[allow(clippy::too_many_arguments)]
+    fn slide_texts(
+        &self,
+        py: Python<'_>,
+        indexes: Option<Vec<isize>>,
+        notes: bool,
+        furniture: bool,
+        hidden_shapes: bool,
+        hidden_slides: bool,
+        alt_text: bool,
+        comments: bool,
+        charts: bool,
+        diagrams: bool,
+    ) -> PyResult<Vec<String>> {
+        let mut options = options(
+            notes,
+            furniture,
+            hidden_shapes,
+            hidden_slides,
+            alt_text,
+            comments,
+        );
+        options.charts = charts;
+        options.diagrams = diagrams;
+        let indexes = self.resolve_indexes(indexes)?;
+        let seed = self.seed.clone();
+        Ok(py.allow_threads(|| {
+            let doc = CoreDocument::from_seed(seed);
+            match indexes {
+                None => doc.slide_texts(&options).0,
+                Some(indexes) => doc.slide_texts_at(&indexes, &options).0,
+            }
+        }))
     }
 
     /// The Core Properties part (`docProps/core.xml`), or None when absent.
@@ -377,11 +459,12 @@ impl Document {
 
     /// The deck as Markdown: a heading per slide, bullets, tables, images,
     /// chart tables and diagram outlines; notes and comments as block quotes on request.
-    #[pyo3(signature = (*, headings=true, notes=false, comments=false, hidden_slides=true, hidden_shapes=false, furniture=false, images=true))]
+    #[pyo3(signature = (*, indexes=None, headings=true, notes=false, comments=false, hidden_slides=true, hidden_shapes=false, furniture=false, images=true))]
     #[allow(clippy::too_many_arguments)]
     fn markdown(
         &self,
         py: Python<'_>,
+        indexes: Option<Vec<isize>>,
         headings: bool,
         notes: bool,
         comments: bool,
@@ -389,7 +472,7 @@ impl Document {
         hidden_shapes: bool,
         furniture: bool,
         images: bool,
-    ) -> String {
+    ) -> PyResult<String> {
         let options = markdown_options(
             headings,
             notes,
@@ -399,8 +482,51 @@ impl Document {
             furniture,
             images,
         );
+        let indexes = self.resolve_indexes(indexes)?;
         let seed = self.seed.clone();
-        py.allow_threads(|| CoreDocument::from_seed(seed).markdown(&options).0)
+        Ok(py.allow_threads(|| {
+            let doc = CoreDocument::from_seed(seed);
+            match indexes {
+                None => doc.markdown(&options).0,
+                Some(indexes) => doc.markdown_at(&indexes, &options).0,
+            }
+        }))
+    }
+
+    /// The raw package view: parts, content types and relationships as
+    /// written. A legacy `.ppt` deck has none.
+    fn package(&self, py: Python<'_>) -> PyResult<Package> {
+        let seed = self.seed.clone();
+        let path = self.path.clone();
+        py.allow_threads(|| {
+            CoreDocument::from_seed(seed)
+                .package()
+                .map(|package| Package::from_seed(package.seed(), path))
+        })
+        .ok_or_else(|| pptx_err("a legacy binary presentation has no package parts"))
+    }
+
+    /// What the document layer worked around to find the slides.
+    #[getter]
+    fn defects(&self) -> DocumentDefects {
+        DocumentDefects::from_core(self.core().defects())
+    }
+
+    /// The parsed presentation part: slide and master ids, sizes and flags.
+    fn presentation(&self) -> Presentation {
+        Presentation::from_core(self.core().presentation())
+    }
+
+    /// Every comment author the presentation links to, both formats.
+    fn comment_authors(&self, py: Python<'_>) -> Vec<CommentAuthor> {
+        let seed = self.seed.clone();
+        py.allow_threads(|| {
+            CoreDocument::from_seed(seed)
+                .comment_authors()
+                .iter()
+                .map(CommentAuthor::from_core)
+                .collect()
+        })
     }
 
     /// The title of every slide (None where a slide has no title placeholder).
@@ -848,6 +974,30 @@ impl Slide {
         })
         .map_err(pptx_err)
     }
+
+    /// The Notes Slide part name, or None.
+    fn notes_part(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        py.allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.notes_part())
+            .map_err(pptx_err)
+    }
+
+    /// The comments part name of either format, or None.
+    fn comments_part(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        py.allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.comments_part())
+            .map_err(pptx_err)
+    }
+
+    /// The Slide Layout part name, or None.
+    fn layout_part(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        py.allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.layout_part())
+            .map_err(pptx_err)
+    }
 }
 
 /// One node of a slide's shape tree.
@@ -882,6 +1032,12 @@ struct Shape {
     image_rel: Option<String>,
     #[pyo3(get)]
     rows: Option<Vec<Vec<String>>>,
+    /// The cell grid with spans and merges, for table shapes.
+    #[pyo3(get)]
+    table: Option<Table>,
+    /// The paragraphs with their runs, for text shapes.
+    #[pyo3(get)]
+    paragraphs: Option<Vec<Paragraph>>,
     #[pyo3(get)]
     children: Vec<Shape>,
 }
@@ -930,6 +1086,11 @@ impl Shape {
             Content::ContentPart(_) => ("content_part", None, None, None, Vec::new()),
             Content::UnknownGraphic(_) => ("unknown", None, None, None, Vec::new()),
         };
+        let (table, paragraphs) = match &shape.content {
+            Content::Table(table) => (Some(Table::from_core(table)), None),
+            Content::Text(body) => (None, Some(paragraphs_from_body(body))),
+            _ => (None, None),
+        };
         Self {
             id: shape.id,
             name: shape.name.clone(),
@@ -947,6 +1108,8 @@ impl Shape {
             rotation: shape.transform.map_or(0, |t| t.rot),
             image_rel,
             rows,
+            table,
+            paragraphs,
             children,
         }
     }
@@ -1269,6 +1432,19 @@ struct Finding {
     message: String,
 }
 
+impl Finding {
+    fn from_core(finding: pptxboss_check::Finding) -> Self {
+        Self {
+            code: finding.code.to_string(),
+            severity: finding.severity.to_string(),
+            clause: finding.clause.to_string(),
+            part: finding.part,
+            location: finding.location,
+            message: finding.message,
+        }
+    }
+}
+
 #[pymethods]
 impl Finding {
     fn __repr__(&self) -> String {
@@ -1309,22 +1485,73 @@ impl Rule {
     }
 }
 
-/// Verifies a deck against ECMA-376 and returns its findings, most severe first.
-#[pyfunction]
-#[pyo3(signature = (path=None, *, data=None, max_findings=1000, verify_crc=true))]
-fn check(
+/// The verifier's result: findings plus how much was checked.
+#[pyclass(frozen, module = "pptxboss")]
+struct CheckReport {
+    /// Most severe first.
+    #[pyo3(get)]
+    findings: Vec<Finding>,
+    #[pyo3(get)]
+    parts_checked: usize,
+    /// True when `max_findings` cut the list short.
+    #[pyo3(get)]
+    truncated: bool,
+    /// Number of findings at error severity.
+    #[pyo3(get)]
+    errors: usize,
+    /// Number of findings at warning severity.
+    #[pyo3(get)]
+    warnings: usize,
+    /// True when no finding is an error.
+    #[pyo3(get)]
+    is_clean: bool,
+    /// Distinct rule codes in order of first appearance.
+    #[pyo3(get)]
+    codes: Vec<String>,
+}
+
+impl CheckReport {
+    fn from_core(report: pptxboss_check::Report) -> Self {
+        Self {
+            parts_checked: report.parts_checked,
+            truncated: report.truncated,
+            errors: report.errors(),
+            warnings: report.warnings(),
+            is_clean: report.is_clean(),
+            codes: report.codes().iter().map(|code| code.to_string()).collect(),
+            findings: report
+                .findings
+                .into_iter()
+                .map(Finding::from_core)
+                .collect(),
+        }
+    }
+}
+
+#[pymethods]
+impl CheckReport {
+    fn __repr__(&self) -> String {
+        format!(
+            "CheckReport(errors={}, warnings={}, parts_checked={}, truncated={})",
+            self.errors, self.warnings, self.parts_checked, self.truncated
+        )
+    }
+}
+
+fn run_check(
     py: Python<'_>,
     path: Option<PathBuf>,
     data: Option<Vec<u8>>,
     max_findings: usize,
+    xml_well_formed: bool,
     verify_crc: bool,
-) -> PyResult<Vec<Finding>> {
+) -> PyResult<pptxboss_check::Report> {
     let options = pptxboss_check::CheckOptions {
         max_findings,
+        xml_well_formed,
         verify_crc,
-        ..pptxboss_check::CheckOptions::default()
     };
-    let report = match (path, data) {
+    match (path, data) {
         (Some(path), None) => py.allow_threads(|| pptxboss_check::check_path(path, &options)),
         (None, Some(data)) => py.allow_threads(|| pptxboss_check::check_bytes(data, &options)),
         _ => {
@@ -1333,19 +1560,42 @@ fn check(
             ))
         }
     }
-    .map_err(pptx_err)?;
+    .map_err(pptx_err)
+}
+
+/// Verifies a deck against ECMA-376 and returns its findings, most severe first.
+#[pyfunction]
+#[pyo3(signature = (path=None, *, data=None, max_findings=1000, xml_well_formed=true, verify_crc=true))]
+fn check(
+    py: Python<'_>,
+    path: Option<PathBuf>,
+    data: Option<Vec<u8>>,
+    max_findings: usize,
+    xml_well_formed: bool,
+    verify_crc: bool,
+) -> PyResult<Vec<Finding>> {
+    let report = run_check(py, path, data, max_findings, xml_well_formed, verify_crc)?;
     Ok(report
         .findings
         .into_iter()
-        .map(|finding| Finding {
-            code: finding.code.to_string(),
-            severity: finding.severity.to_string(),
-            clause: finding.clause.to_string(),
-            part: finding.part,
-            location: finding.location,
-            message: finding.message,
-        })
+        .map(Finding::from_core)
         .collect())
+}
+
+/// Verifies a deck and returns the findings with the parts checked and
+/// whether `max_findings` truncated the list.
+#[pyfunction]
+#[pyo3(signature = (path=None, *, data=None, max_findings=1000, xml_well_formed=true, verify_crc=true))]
+fn check_report(
+    py: Python<'_>,
+    path: Option<PathBuf>,
+    data: Option<Vec<u8>>,
+    max_findings: usize,
+    xml_well_formed: bool,
+    verify_crc: bool,
+) -> PyResult<CheckReport> {
+    let report = run_check(py, path, data, max_findings, xml_well_formed, verify_crc)?;
+    Ok(CheckReport::from_core(report))
 }
 
 /// Every rule the verifier knows.
@@ -1381,8 +1631,12 @@ fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Diagram>()?;
     m.add_class::<Finding>()?;
     m.add_class::<Rule>()?;
+    m.add_class::<CheckReport>()?;
     m.add_function(wrap_pyfunction!(check, m)?)?;
+    m.add_function(wrap_pyfunction!(check_report, m)?)?;
     m.add_function(wrap_pyfunction!(rules, m)?)?;
+    model::register(m)?;
+    package::register(m)?;
     write::register(m)?;
     Ok(())
 }

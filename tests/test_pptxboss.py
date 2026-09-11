@@ -221,3 +221,93 @@ def test_legacy_ppt_reads_through_the_same_api(legacy_ppt: Path) -> None:
     assert doc.core_properties() is None and doc.sections() == []
     with pytest.raises(pptxboss.PptxError):
         pptxboss.check(legacy_ppt)
+
+
+def test_shape_table_keeps_spans_and_cells(shapes_pptx: Path) -> None:
+    slide = pptxboss.Document(shapes_pptx).slide(0)
+    shapes = slide.shapes()
+    assert shapes[0].table is None
+    table = shapes[2].table
+    assert table is not None
+    assert len(table.column_widths) == 2 and all(width > 0 for width in table.column_widths)
+    assert [[cell.text for cell in row.cells] for row in table.rows] == [["Name", "Value"], ["Answer", "42"]]
+    first = table.rows[0].cells[0]
+    assert first.grid_span == 1 and first.row_span == 1
+    assert first.h_merge is False and first.v_merge is False and first.is_origin
+    assert first.paragraphs[0].text == "Name"
+    assert table.rows[0].height > 0
+
+
+def test_shape_paragraphs_expose_runs(shapes_pptx: Path) -> None:
+    slide = pptxboss.Document(shapes_pptx).slide(0)
+    shapes = slide.shapes()
+    title = shapes[0].paragraphs
+    assert title is not None and len(title) == 1
+    assert title[0].text == "Shapes" and title[0].level == 0
+    assert title[0].bullet in {"inherited", "none"}
+    run = title[0].runs[0]
+    assert run.kind == "text" and run.text == "Shapes"
+    assert run.bold is None and run.hyperlink is None
+    assert shapes[1].paragraphs is None
+    assert shapes[3].children[0].paragraphs[0].runs[0].text == "grouped link"
+
+
+def test_slide_selection_by_index(three_slides_pptx: Path) -> None:
+    doc = pptxboss.Document(three_slides_pptx)
+    every = doc.slide_texts()
+    assert doc.slide_texts(indexes=[2, 0]) == [every[2], every[0]]
+    assert doc.slide_texts(indexes=[-1]) == [every[2]]
+    assert doc.slide_texts(indexes=[]) == []
+    assert doc.markdown(indexes=[1]).startswith("## Second slide")
+    assert "First slide" not in doc.markdown(indexes=[1, 2])
+    with pytest.raises(IndexError):
+        doc.slide_texts(indexes=[3])
+    with pytest.raises(IndexError):
+        doc.markdown(indexes=[-4])
+
+
+def test_extract_returns_a_structured_report(three_slides_pptx: Path) -> None:
+    doc = pptxboss.Document(three_slides_pptx)
+    text, report = doc.extract()
+    assert text == doc.text()
+    assert isinstance(report, pptxboss.ExtractReport)
+    assert report.is_complete
+    assert report.failed_slides == [] and report.failed_notes == []
+    assert report.failed_comments == [] and report.failed_frames == []
+    assert report.unknown_graphics == 0 and report.unknown_graphic_uris == []
+    assert report.unknown_elements == 0
+    assert report.hidden_slides_skipped == 0
+    assert report.warnings == []
+    without_hidden, skipped = doc.extract(hidden_slides=False)
+    assert "Hidden slide" not in without_hidden
+    assert skipped.hidden_slides_skipped == 1 and skipped.is_complete
+    selected, _ = doc.extract(indexes=[1])
+    assert selected == doc.slide_texts()[1]
+    assert doc.extract(indexes=[0, 1])[0] == "\n\n".join(doc.slide_texts(indexes=[0, 1]))
+    assert doc.extract(indexes=[2, 0], hidden_slides=False)[0] == doc.slide_texts()[0]
+
+
+def test_check_report_carries_counts_and_truncation(three_slides_pptx: Path, tmp_path: Path) -> None:
+    import zipfile
+
+    report = pptxboss.check_report(three_slides_pptx)
+    assert isinstance(report, pptxboss.CheckReport)
+    assert report.findings == [] and report.codes == []
+    assert report.parts_checked > 5
+    assert report.truncated is False and report.is_clean
+    assert report.errors == 0 and report.warnings == 0
+    assert pptxboss.check(three_slides_pptx, xml_well_formed=False) == []
+    broken = tmp_path / "broken.pptx"
+    with zipfile.ZipFile(three_slides_pptx) as src, zipfile.ZipFile(broken, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename == "ppt/presProps.xml":
+                continue
+            dst.writestr(item, src.read(item.filename))
+    truncated = pptxboss.check_report(broken, max_findings=1)
+    assert truncated.truncated is True and len(truncated.findings) == 1
+    full = pptxboss.check_report(data=broken.read_bytes())
+    assert full.truncated is False and full.errors >= 1 and not full.is_clean
+    assert "PML003" in full.codes
+    assert repr(full).startswith("CheckReport(")
+    with pytest.raises(ValueError):
+        pptxboss.check_report()
