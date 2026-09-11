@@ -200,3 +200,24 @@ def test_charts_diagrams_and_markdown(features_pptx: Path) -> None:
     assert markdown.startswith("## Commented\n\n- A point\n\n![A blue diagram](ppt/media/image1.png)")
     assert "| Q1 | 10 |" in markdown
     assert slide.markdown().startswith("## Figures\n\n**Chart: Revenue**")
+
+
+def test_legacy_ppt_reads_through_the_same_api(legacy_ppt: Path) -> None:
+    doc = pptxboss.Document(legacy_ppt)
+    assert doc.format == "ppt"
+    assert doc.slide_count == 3
+    assert doc.slide_size == (9144000, 6858000)
+    first = doc[0]
+    assert first.title == "Legacy title"
+    assert first.text() == "Legacy title\nFirst point\nDetail\nFree text"
+    assert first.notes() == "Speaker notes here"
+    images = first.images()
+    assert len(images) == 1 and images[0].content_type == "image/png"
+    assert first.image_bytes(images[0]).startswith(b"\x89PNG")
+    assert doc[1].hidden is True
+    assert doc[2].title is None
+    assert doc.text(notes=True).startswith("Legacy title\nFirst point\nDetail\nFree text\nSpeaker notes here")
+    assert doc.markdown().startswith("## Legacy title\n\n- First point\n  - Detail")
+    assert doc.core_properties() is None and doc.sections() == []
+    with pytest.raises(pptxboss.PptxError):
+        pptxboss.check(legacy_ppt)

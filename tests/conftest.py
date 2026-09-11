@@ -25,3 +25,8 @@ def shapes_pptx() -> Path:
 @pytest.fixture
 def features_pptx() -> Path:
     return FIXTURES / "features.pptx"
+
+
+@pytest.fixture
+def legacy_ppt() -> Path:
+    return FIXTURES / "legacy.ppt"

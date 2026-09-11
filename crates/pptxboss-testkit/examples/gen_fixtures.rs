@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use pptxboss_testkit::{Deck, DeckSlide};
+use pptxboss_testkit::{Deck, DeckSlide, PptDeck, PptSlide};
 
 const PNG: &[u8] = &[
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -82,4 +82,19 @@ fn main() {
         std::fs::write(&path, deck.build()).expect("fixture written");
         println!("wrote {}", path.display());
     }
+    let legacy = PptDeck::new()
+        .picture(PNG)
+        .slide(
+            PptSlide::titled("Legacy title")
+                .bullet("First point")
+                .sub_bullet("Detail", 1)
+                .text_box("Free text")
+                .picture(1)
+                .notes("Speaker notes here"),
+        )
+        .slide(PptSlide::titled("Second").bullet("Only one").hidden())
+        .slide(PptSlide::default().text_box("No title at all"));
+    let path = dir.join("legacy.ppt");
+    std::fs::write(&path, legacy.build()).expect("fixture written");
+    println!("wrote {}", path.display());
 }

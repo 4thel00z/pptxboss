@@ -2,7 +2,7 @@
 
 | Crate | Start here |
 |---|---|
-| `pptxboss-core` | `Document::open`, `Document::slide`, `Slide::text`, `Document::map_slides`, `Document::markdown`, `Document::core_properties`, `Document::sections`, `Slide::comments`, `Slide::charts`, `Slide::diagrams`, `Slide::objects`; `Package` for the raw view; `zip::Archive`, `inflate`, `xml::Reader`, `opc`, `model`, `chart`, `diagram`, `markdown` |
+| `pptxboss-core` | `Document::open`, `Document::slide`, `Slide::text`, `Document::map_slides`, `Document::markdown`, `Document::core_properties`, `Document::sections`, `Slide::comments`, `Slide::charts`, `Slide::diagrams`, `Slide::objects`; `Package` for the raw view; `zip::Archive`, `inflate`, `xml::Reader`, `opc`, `model`, `chart`, `diagram`, `markdown`; `cfb::Compound` and `ppt::LegacyDeck` behind `.ppt` files (`Document::legacy`) |
 | `pptxboss-check` | `check`, `check_path`, `check_bytes`, `rules`, `Finding`, `Severity`, `CheckOptions` |
 | `pptxboss-write` | `Presentation`, `Slide`, `Paragraph`, `Rect`, `SlideSize`, `Layout`, `from_markdown` |
 | `pptxboss-cli` | the binary |

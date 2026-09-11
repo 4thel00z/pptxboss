@@ -1,13 +1,13 @@
 ---
 name: pptxboss
-description: Use when reading, extracting, verifying, or creating PowerPoint .pptx files with pptxboss, the from-scratch Rust PresentationML engine with a CLI and Python bindings. Triggers include extracting text, titles, speaker notes or tables from a deck, listing or saving the pictures on a slide, checking a .pptx against ECMA-376 (validation, lint, repair prompts), creating a deck from Markdown or from arguments, and inspecting a deck's slides and size.
+description: Use when reading, extracting, verifying, or creating PowerPoint .pptx (and reading legacy .ppt) files with pptxboss, the from-scratch Rust PresentationML engine with a CLI and Python bindings. Triggers include extracting text, titles, speaker notes or tables from a deck, listing or saving the pictures on a slide, checking a .pptx against ECMA-376 (validation, lint, repair prompts), creating a deck from Markdown or from arguments, and inspecting a deck's slides and size.
 ---
 
 # pptxboss
 
-pptxboss reads and verifies `.pptx` decks and creates new ones. It is a
-clean-room implementation of ECMA-376 in safe Rust: no PowerPoint, no Java,
-no C. The reader is lenient and reports what it skips; the verifier is
+pptxboss reads and verifies `.pptx` decks, reads legacy `.ppt` decks, and
+creates new ones. It is a clean-room implementation of ECMA-376 (and of the
+MS-PPT binary format) in safe Rust: no PowerPoint, no Java, no C. The reader is lenient and reports what it skips; the verifier is
 strict and cites the clause behind every finding.
 
 ## Install
@@ -107,8 +107,10 @@ caps it.
 - Comments and alternative text are off by default in every text call so
   the output stays comparable with the slide content; pass `--comments`,
   `--alt-text` or the matching keyword arguments.
-- Encrypted decks and legacy binary `.ppt` files are compound files, not
-  packages; they are refused with a clear error.
+- Legacy `.ppt` files read through every command and API (text, notes,
+  titles, pictures, hidden flags, Markdown); `check` refuses them because
+  the verifier covers ECMA-376 packages only. Password-protected files of
+  either format are refused, not decrypted.
 - `check` exit code 1 means errors were found; warnings alone exit 0.
   Real PowerPoint output verifies clean; files from other writers often
   carry duplicate shape ids (PML019) or directory entries (ZIP006).

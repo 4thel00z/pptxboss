@@ -61,6 +61,7 @@ fn main() {
             let mut total = 0;
             for slide in doc.slide_refs() {
                 doc.package()
+                    .expect("package")
                     .read_part_into(&slide.part, &mut out)
                     .expect("readable part");
                 total += out.len();
@@ -71,7 +72,11 @@ fn main() {
             let mut events = 0usize;
             let mut bytes = 0usize;
             for slide in doc.slide_refs() {
-                let xml = doc.package().read_part(&slide.part).expect("readable part");
+                let xml = doc
+                    .package()
+                    .expect("package")
+                    .read_part(&slide.part)
+                    .expect("readable part");
                 bytes += xml.len();
                 let mut reader = pptxboss_core::xml::Reader::new(&xml);
                 loop {
@@ -90,7 +95,7 @@ fn main() {
             slide_bytes.0,
             tokenize.as_secs_f64() * 1e3
         );
-        println!("  slides {:>4}  parts {:>4}  text {} chars (parallel) / {} chars (sequential, no notes)", doc.slide_count(), doc.package().parts().len(), par_len, seq_len);
+        println!("  slides {:>4}  parts {:>4}  text {} chars (parallel) / {} chars (sequential, no notes)", doc.slide_count(), doc.package().map_or(0, |p| p.parts().len()), par_len, seq_len);
         println!(
             "  open (positioned)      {:>8.2} ms",
             open.as_secs_f64() * 1e3

@@ -1,7 +1,11 @@
 # Limitations
 
-- Encrypted packages and legacy binary `.ppt` files are OLE compound files;
-  they are detected and refused, not read.
+- Password-protected files (encrypted packages, encrypted `.ppt`) are
+  detected and refused, not decrypted.
+- Legacy `.ppt` decks: text, titles, notes, hidden flags, slide size and
+  pictures are read; tables, charts, comments and document properties of
+  the binary format are not, and the verifier does not cover it.
+  PowerPoint 95 files are refused.
 - Interleaved ZIP items (`[n].piece`) are reassembled, but no public test
   deck contains them; the testkit fixture is the only evidence.
 - Charts give their cached title, series, categories and values; nothing

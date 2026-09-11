@@ -130,6 +130,15 @@ impl Document {
         self.seed.threads()
     }
 
+    /// `pptx` for an ECMA-376 package, `ppt` for a legacy binary presentation.
+    #[getter]
+    fn format(&self) -> &'static str {
+        match self.core().is_legacy() {
+            true => "ppt",
+            false => "pptx",
+        }
+    }
+
     #[getter]
     fn path(&self) -> Option<String> {
         self.path.clone()
@@ -687,18 +696,26 @@ impl Slide {
         object: &EmbeddedObject,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let seed = self.seed.clone();
-        let part = object.part.clone().ok_or_else(|| {
-            pptx_err(format!(
+        let index = self.index;
+        if object.part.is_none() {
+            return Err(pptx_err(format!(
                 "object {} is not stored in the package",
                 object.rel_id.clone().unwrap_or_default()
-            ))
-        })?;
+            )));
+        }
+        let reference = pptxboss_core::ObjectRef {
+            shape_id: object.shape_id,
+            prog_id: object.prog_id.clone(),
+            rel_id: object.rel_id.clone(),
+            part: object.part.clone(),
+            content_type: object.content_type.clone(),
+            external: object.external.clone(),
+        };
         let bytes = py
             .allow_threads(|| {
-                let doc = CoreDocument::from_seed(seed);
-                let mut out = Vec::new();
-                doc.package().read_part_into(&part, &mut out)?;
-                Ok::<_, pptxboss_core::Error>(out)
+                CoreDocument::from_seed(seed)
+                    .slide(index)?
+                    .object_bytes(&reference)
             })
             .map_err(pptx_err)?;
         Ok(PyBytes::new(py, &bytes))
@@ -795,18 +812,25 @@ impl Slide {
     /// The bytes of an image part referenced from this slide.
     fn image_bytes<'py>(&self, py: Python<'py>, image: &Image) -> PyResult<Bound<'py, PyBytes>> {
         let seed = self.seed.clone();
-        let part = image.part.clone().ok_or_else(|| {
-            pptx_err(format!(
+        let index = self.index;
+        if image.part.is_none() {
+            return Err(pptx_err(format!(
                 "image {} is not stored in the package",
                 image.rel_id
-            ))
-        })?;
+            )));
+        }
+        let reference = pptxboss_core::ImageRef {
+            shape_id: image.shape_id,
+            rel_id: image.rel_id.clone(),
+            part: image.part.clone(),
+            content_type: image.content_type.clone(),
+            external: image.external.clone(),
+        };
         let bytes = py
             .allow_threads(|| {
-                let doc = CoreDocument::from_seed(seed);
-                let mut out = Vec::new();
-                doc.package().read_part_into(&part, &mut out)?;
-                Ok::<_, pptxboss_core::Error>(out)
+                CoreDocument::from_seed(seed)
+                    .slide(index)?
+                    .image_bytes(&reference)
             })
             .map_err(pptx_err)?;
         Ok(PyBytes::new(py, &bytes))

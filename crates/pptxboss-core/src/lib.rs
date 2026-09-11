@@ -9,6 +9,7 @@
 //! packages where the structure still allows it and reporting what it
 //! skipped.
 
+pub mod cfb;
 pub mod chart;
 pub mod comments;
 pub mod crc32;
@@ -24,6 +25,7 @@ pub mod model;
 pub mod opc;
 pub mod package;
 pub mod pml;
+pub mod ppt;
 pub mod presentation;
 pub mod properties;
 pub mod slide;

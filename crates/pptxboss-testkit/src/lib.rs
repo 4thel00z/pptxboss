@@ -7,10 +7,12 @@
 //! CRC-32 and serializes every header itself.
 
 pub mod deck;
+pub mod legacy;
 
 use std::io::Write;
 
 pub use deck::{Deck, DeckSlide};
+pub use legacy::{compound_file, PptDeck, PptSlide};
 
 use flate2::write::DeflateEncoder;
 use flate2::Compression;

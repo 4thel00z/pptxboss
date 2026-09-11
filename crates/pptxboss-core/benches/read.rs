@@ -72,7 +72,11 @@ fn bench_text(c: &mut Criterion) {
 fn bench_parse(c: &mut Criterion) {
     let bytes = deck(1, 20);
     let doc = Document::load(bytes).unwrap();
-    let xml = doc.package().read_part("/ppt/slides/slide1.xml").unwrap();
+    let xml = doc
+        .package()
+        .expect("package")
+        .read_part("/ppt/slides/slide1.xml")
+        .unwrap();
     let mut group = c.benchmark_group("parse");
     group.throughput(Throughput::Bytes(xml.len() as u64));
     group.bench_function("slide xml, 20 bullets", |b| {

@@ -45,6 +45,8 @@ struct Properties {
 #[derive(Serialize)]
 struct Info {
     file: String,
+    /// `pptx` for an ECMA-376 package, `ppt` for a legacy binary presentation.
+    format: &'static str,
     presentation_part: String,
     slides: usize,
     slide_size_emu: Option<(i64, i64)>,
@@ -115,13 +117,17 @@ fn collect(doc: &Document, file: &Path) -> Info {
     let app = doc.app_properties().ok().flatten().unwrap_or_default();
     Info {
         file: file.display().to_string(),
+        format: match doc.is_legacy() {
+            true => "ppt",
+            false => "pptx",
+        },
         presentation_part: doc.presentation_part().to_string(),
         slides: doc.slide_count(),
         slide_size_emu: size.map(|size| (size.cx, size.cy)),
         slide_size_inches: size.map(|size| (size.cx as f64 / 914400.0, size.cy as f64 / 914400.0)),
         slide_size_type: size.and_then(|size| size.kind.clone()),
         masters: presentation.masters.len(),
-        parts: doc.package().parts().len(),
+        parts: doc.package().map_or(0, |package| package.parts().len()),
         properties: Properties {
             title: core.title,
             subject: core.subject,
@@ -176,6 +182,7 @@ pub fn run(doc: &Document, file: &Path, json: bool) -> Result<(), Failure> {
         return Ok(());
     }
     writeln!(out, "file:         {}", info.file)?;
+    writeln!(out, "format:       {}", info.format)?;
     writeln!(out, "presentation: {}", info.presentation_part)?;
     writeln!(out, "slides:       {}", info.slides)?;
     if let (Some((cx, cy)), Some((w, h))) = (info.slide_size_emu, info.slide_size_inches) {

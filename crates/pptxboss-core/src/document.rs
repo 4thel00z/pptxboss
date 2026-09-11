@@ -11,6 +11,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use crate::cfb::{self, Compound};
 use crate::chart::{parse_chart, ChartData};
 use crate::comments::{parse_authors, parse_comments, Comment, CommentAuthor};
 use crate::diagram::{parse_diagram, DiagramData};
@@ -19,14 +20,18 @@ use crate::model::{Content, PlaceholderKind, SlideContent, TextBody};
 use crate::opc::{Relationships, TargetMode};
 use crate::package::{Package, PackageSeed};
 use crate::pml::{content_type, RelKind};
+use crate::ppt::{self, LegacyDeck};
 use crate::presentation::Presentation;
 use crate::properties::{AppProperties, CoreProperties};
 use crate::slide::{parse_slide, SlideReport};
 use crate::text::{write_content_text, ExtractReport, TextOptions};
+use crate::zip::{FileSource, Source};
 
 /// How the presentation part was found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Located {
+    /// A legacy binary presentation: the `PowerPoint Document` stream.
+    LegacyStream,
     /// Through the `officeDocument` relationship of the package (13.3.6).
     Relationship,
     /// By scanning content types for a presentation main type.
@@ -61,7 +66,10 @@ struct Shared {
     presentation: Presentation,
     slides: Vec<SlideRef>,
     defects: DocumentDefects,
-    package: PackageSeed,
+    /// The package behind a PresentationML deck; None for a legacy binary deck.
+    package: Option<PackageSeed>,
+    /// The parsed legacy deck; None for a package.
+    legacy: Option<Arc<LegacyDeck>>,
     /// Comment authors of both flavours, read on first use.
     authors: OnceLock<Vec<CommentAuthor>>,
 }
@@ -105,7 +113,7 @@ impl DocumentSeed {
 
 /// An open presentation.
 pub struct Document {
-    package: Package,
+    package: Option<Package>,
     shared: Arc<Shared>,
     threads: usize,
 }
@@ -121,12 +129,86 @@ fn threads_from_env() -> usize {
 impl Document {
     /// Opens a `.pptx` file with positioned reads.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_package(Package::open(path)?)
+        let source = FileSource::open(path)?;
+        Self::from_source(Arc::new(source))
+    }
+
+    /// Opens a deck over any positioned source: a package, or a compound
+    /// file holding a legacy binary presentation. Encrypted files are refused.
+    pub fn from_source(source: Arc<dyn Source>) -> Result<Self> {
+        let mut head = [0u8; 8];
+        if source.len() >= 8 {
+            source.read_at(0, &mut head)?;
+        }
+        if cfb::is_compound(&head) || head.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) {
+            let compound = Compound::open_source(source)?;
+            if compound.has_stream("EncryptionInfo") || compound.has_stream("EncryptedPackage") {
+                return Err(Error::Encrypted("package encrypted with a password".into()));
+            }
+            if ppt::is_presentation(&compound) {
+                return Ok(Self::from_legacy(ppt::open_compound(&compound)?));
+            }
+            return Err(Error::NoPresentationStream);
+        }
+        Self::from_package(Package::from_source(source)?)
+    }
+
+    /// A document over a parsed legacy deck; slides map onto the same model.
+    pub fn from_legacy(deck: Arc<LegacyDeck>) -> Self {
+        let slide_ids = deck.slide_ids();
+        let presentation = Presentation {
+            slides: slide_ids
+                .iter()
+                .map(|id| crate::presentation::SlideId {
+                    id: Some(*id),
+                    rel_id: String::new(),
+                    offset: 0,
+                })
+                .collect(),
+            slide_size: deck
+                .slide_size
+                .map(|(cx, cy)| crate::presentation::SlideSize {
+                    cx,
+                    cy,
+                    kind: deck.slide_size_kind.map(str::to_string),
+                }),
+            notes_size: deck.notes_size,
+            first_slide_num: deck.first_slide_number,
+            root_ok: true,
+            ..Presentation::default()
+        };
+        let slides = slide_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| SlideRef {
+                part: format!("PowerPoint Document/slide{}", index + 1),
+                id: Some(*id),
+                rel_id: String::new(),
+            })
+            .collect();
+        let shared = Arc::new(Shared {
+            presentation_part: "PowerPoint Document".to_string(),
+            presentation,
+            slides,
+            defects: DocumentDefects {
+                located: Located::LegacyStream,
+                unresolved_slides: Vec::new(),
+                slides_recovered_from_rels: deck.slides_recovered_by_scan,
+            },
+            package: None,
+            legacy: Some(deck),
+            authors: OnceLock::new(),
+        });
+        Self {
+            package: None,
+            shared,
+            threads: threads_from_env(),
+        }
     }
 
     /// Opens a presentation held in memory.
     pub fn load(bytes: Vec<u8>) -> Result<Self> {
-        Self::from_package(Package::from_bytes(bytes)?)
+        Self::from_source(Arc::new(bytes))
     }
 
     pub fn from_package(package: Package) -> Result<Self> {
@@ -178,11 +260,12 @@ impl Document {
             presentation,
             slides,
             defects,
-            package: package.seed(),
+            package: Some(package.seed()),
+            legacy: None,
             authors: OnceLock::new(),
         });
         Ok(Self {
-            package,
+            package: Some(package),
             shared,
             threads: threads_from_env(),
         })
@@ -193,7 +276,7 @@ impl Document {
         let Some(part) = self.metadata_part(RelKind::CoreProperties, "/docProps/core.xml")? else {
             return Ok(None);
         };
-        let xml = self.package.read_part(&part)?;
+        let xml = self.pkg()?.read_part(&part)?;
         CoreProperties::parse(&xml)
             .map(Some)
             .map_err(|err| xml_error(&part, err))
@@ -205,7 +288,7 @@ impl Document {
         else {
             return Ok(None);
         };
-        let xml = self.package.read_part(&part)?;
+        let xml = self.pkg()?.read_part(&part)?;
         AppProperties::parse(&xml)
             .map(Some)
             .map_err(|err| xml_error(&part, err))
@@ -213,17 +296,19 @@ impl Document {
 
     /// A package-level metadata part: by relationship kind, else at its conventional name.
     fn metadata_part(&self, kind: RelKind, conventional: &str) -> Result<Option<String>> {
-        let rels = self.package.package_rels()?;
+        let Some(package) = self.package.as_ref() else {
+            return Ok(None);
+        };
+        let rels = package.package_rels()?;
         let by_rel = rels
             .iter()
             .filter(|rel| RelKind::of(&rel.rel_type) == kind)
             .find_map(|rel| rels.resolve(rel))
-            .filter(|part| self.package.has_part(part));
+            .filter(|part| package.has_part(part));
         if by_rel.is_some() {
             return Ok(by_rel);
         }
-        Ok(self
-            .package
+        Ok(package
             .has_part(conventional)
             .then(|| conventional.to_string()))
     }
@@ -255,7 +340,10 @@ impl Document {
     /// unreadable authors parts count as empty.
     pub fn comment_authors(&self) -> &[CommentAuthor] {
         self.shared.authors.get_or_init(|| {
-            let Ok(rels) = self.package.rels(&self.shared.presentation_part) else {
+            let Some(package) = self.package.as_ref() else {
+                return Vec::new();
+            };
+            let Ok(rels) = package.rels(&self.shared.presentation_part) else {
                 return Vec::new();
             };
             let mut authors = Vec::new();
@@ -267,7 +355,7 @@ impl Document {
                 let Some(part) = rels.resolve(rel) else {
                     continue;
                 };
-                let Ok(xml) = self.package.read_part(&part) else {
+                let Ok(xml) = package.read_part(&part) else {
                     continue;
                 };
                 if let Ok(mut parsed) = parse_authors(&xml) {
@@ -305,14 +393,31 @@ impl Document {
     /// A document over the same archive and presentation, with its own caches.
     pub fn from_seed(seed: DocumentSeed) -> Self {
         Self {
-            package: Package::from_seed(seed.shared.package.clone()),
+            package: seed.shared.package.clone().map(Package::from_seed),
             shared: seed.shared,
             threads: seed.threads,
         }
     }
 
-    pub fn package(&self) -> &Package {
-        &self.package
+    /// The package behind a PresentationML deck; None for a legacy binary deck.
+    pub fn package(&self) -> Option<&Package> {
+        self.package.as_ref()
+    }
+
+    /// The parsed legacy deck behind a `.ppt` file; None for a package.
+    pub fn legacy(&self) -> Option<&Arc<LegacyDeck>> {
+        self.shared.legacy.as_ref()
+    }
+
+    /// True for a legacy binary presentation.
+    pub fn is_legacy(&self) -> bool {
+        self.shared.legacy.is_some()
+    }
+
+    fn pkg(&self) -> Result<&Package> {
+        self.package.as_ref().ok_or_else(|| {
+            Error::Unsupported("a legacy binary presentation has no package parts".into())
+        })
     }
 
     pub fn presentation(&self) -> &Presentation {
@@ -344,7 +449,17 @@ impl Document {
             .slides
             .get(index)
             .ok_or(Error::SlideNotFound(index))?;
-        let xml = self.package.read_part(&slide_ref.part)?;
+        if let Some(deck) = &self.shared.legacy {
+            let slide = deck.slide(index)?;
+            return Ok(Slide {
+                doc: self,
+                index,
+                part: slide_ref.part.clone(),
+                content: slide.content,
+                report: SlideReport::default(),
+            });
+        }
+        let xml = self.pkg()?.read_part(&slide_ref.part)?;
         let (content, report) = parse_slide(&xml).map_err(|err| Error::Xml {
             part: slide_ref.part.clone(),
             offset: err.offset,
@@ -366,7 +481,7 @@ impl Document {
 
     /// Reads and parses any slide-family part by name (layouts, masters, notes).
     pub fn slide_part(&self, part: &str) -> Result<(SlideContent, SlideReport)> {
-        let xml = self.package.read_part(part)?;
+        let xml = self.pkg()?.read_part(part)?;
         parse_slide(&xml).map_err(|err| Error::Xml {
             part: part.to_string(),
             offset: err.offset,
@@ -566,7 +681,10 @@ impl<'d> Slide<'d> {
 
     /// The slide's relationships.
     pub fn rels(&self) -> Result<Rc<Relationships>> {
-        self.doc.package.rels(&self.part)
+        match self.doc.package.as_ref() {
+            Some(package) => package.rels(&self.part),
+            None => Ok(Rc::new(Relationships::empty(&self.part))),
+        }
     }
 
     /// The first title placeholder's text.
@@ -626,21 +744,22 @@ impl<'d> Slide<'d> {
     /// The chart part behind relationship `rel_id`, parsed.
     pub fn chart(&self, rel_id: &str) -> Result<ChartData> {
         let part = self.frame_part(rel_id)?;
-        let xml = self.doc.package.read_part(&part)?;
+        let xml = self.doc.pkg()?.read_part(&part)?;
         parse_chart(&xml).map_err(|err| xml_error(&part, err))
     }
 
     /// The diagram data part behind relationship `rel_id`, parsed.
     pub fn diagram(&self, rel_id: &str) -> Result<DiagramData> {
         let part = self.frame_part(rel_id)?;
-        let xml = self.doc.package.read_part(&part)?;
+        let xml = self.doc.pkg()?.read_part(&part)?;
         parse_diagram(&xml).map_err(|err| xml_error(&part, err))
     }
 
     fn frame_part(&self, rel_id: &str) -> Result<String> {
         let rels = self.rels()?;
+        let package = self.doc.pkg()?;
         rels.target_of(rel_id)
-            .filter(|part| self.doc.package.has_part(part))
+            .filter(|part| package.has_part(part))
             .ok_or_else(|| Error::MissingRelationship {
                 part: self.part.clone(),
                 id: rel_id.to_string(),
@@ -723,6 +842,11 @@ impl<'d> Slide<'d> {
 
     /// The Notes Slide part, if the slide has one.
     pub fn notes_part(&self) -> Result<Option<String>> {
+        if let Some(deck) = self.doc.legacy() {
+            return Ok(deck
+                .has_notes(self.index)
+                .then(|| format!("PowerPoint Document/notes{}", self.index + 1)));
+        }
         self.related_part(RelKind::NotesSlide)
     }
 
@@ -739,13 +863,14 @@ impl<'d> Slide<'d> {
         let Some(part) = self.comments_part()? else {
             return Ok(Vec::new());
         };
-        let xml = self.doc.package.read_part(&part)?;
+        let xml = self.doc.pkg()?.read_part(&part)?;
         parse_comments(&xml, self.doc.comment_authors()).map_err(|err| xml_error(&part, err))
     }
 
     /// Every embedded object on the slide with its part resolved.
     pub fn objects(&self) -> Result<Vec<ObjectRef>> {
         let rels = self.rels()?;
+        let package = self.doc.package.as_ref();
         let mut objects = Vec::new();
         for shape in self.content.walk() {
             let Content::Ole(ole) = &shape.content else {
@@ -754,10 +879,10 @@ impl<'d> Slide<'d> {
             let rel = ole.rel_id.as_deref().and_then(|id| rels.get(id));
             let part = rel
                 .and_then(|rel| rels.resolve(rel))
-                .filter(|part| self.doc.package.has_part(part));
+                .filter(|part| package.is_some_and(|package| package.has_part(part)));
             let content_type = part
                 .as_deref()
-                .and_then(|part| self.doc.package.content_type_of(part))
+                .and_then(|part| package.and_then(|package| package.content_type_of(part)))
                 .map(str::to_string);
             objects.push(ObjectRef {
                 shape_id: shape.id,
@@ -783,7 +908,7 @@ impl<'d> Slide<'d> {
                 id: object.rel_id.clone().unwrap_or_default(),
             })?;
         let mut out = Vec::new();
-        self.doc.package.read_part_into(part, &mut out)?;
+        self.doc.pkg()?.read_part_into(part, &mut out)?;
         Ok(out)
     }
 
@@ -796,6 +921,9 @@ impl<'d> Slide<'d> {
     /// when there is none, every text shape on it other than the slide
     /// image and furniture.
     pub fn notes(&self) -> Result<Option<TextBody>> {
+        if let Some(deck) = self.doc.legacy() {
+            return deck.notes(self.index);
+        }
         let Some(part) = self.notes_part()? else {
             return Ok(None);
         };
@@ -838,6 +966,10 @@ impl<'d> Slide<'d> {
 
     /// Every picture on the slide with its image part resolved.
     pub fn images(&self) -> Result<Vec<ImageRef>> {
+        if let Some(deck) = self.doc.legacy() {
+            return Ok(self.legacy_images(deck));
+        }
+        let package = self.doc.pkg()?;
         let rels = self.rels()?;
         let mut images = Vec::new();
         for shape in self.content.walk() {
@@ -855,10 +987,10 @@ impl<'d> Slide<'d> {
             let rel = rels.get(rel_id);
             let part = rel
                 .and_then(|rel| rels.resolve(rel))
-                .filter(|part| self.doc.package.has_part(part));
+                .filter(|part| package.has_part(part));
             let content_type = part
                 .as_deref()
-                .and_then(|part| self.doc.package.content_type_of(part))
+                .and_then(|part| package.content_type_of(part))
                 .map(str::to_string);
             let external = rel
                 .filter(|rel| rel.mode == TargetMode::External)
@@ -874,8 +1006,52 @@ impl<'d> Slide<'d> {
         Ok(images)
     }
 
+    /// Pictures of a legacy slide: blip indexes stand in for relationship ids.
+    fn legacy_images(&self, deck: &LegacyDeck) -> Vec<ImageRef> {
+        let mut images = Vec::new();
+        for shape in self.content.walk() {
+            let picture = match &shape.content {
+                Content::Picture(picture) => picture,
+                Content::Ole(ole) => match &ole.preview {
+                    Some(picture) => picture,
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let Some(index) = picture.embed.as_deref() else {
+                continue;
+            };
+            let content_type = index
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| deck.picture_content_type(index))
+                .map(str::to_string);
+            images.push(ImageRef {
+                shape_id: shape.id,
+                rel_id: index.to_string(),
+                part: content_type.is_some().then(|| format!("Pictures/{index}")),
+                content_type,
+                external: None,
+            });
+        }
+        images
+    }
+
     /// The bytes of an image part referenced from this slide.
     pub fn image_bytes(&self, image: &ImageRef) -> Result<Vec<u8>> {
+        if let Some(deck) = self.doc.legacy() {
+            let picture = image
+                .rel_id
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| deck.picture(index).ok().flatten());
+            return picture.map(|picture| picture.bytes).ok_or_else(|| {
+                Error::MissingRelationship {
+                    part: self.part.clone(),
+                    id: image.rel_id.clone(),
+                }
+            });
+        }
         let part = image
             .part
             .as_deref()
@@ -884,7 +1060,7 @@ impl<'d> Slide<'d> {
                 id: image.rel_id.clone(),
             })?;
         let mut out = Vec::new();
-        self.doc.package.read_part_into(part, &mut out)?;
+        self.doc.pkg()?.read_part_into(part, &mut out)?;
         Ok(out)
     }
 

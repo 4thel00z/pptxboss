@@ -6,7 +6,8 @@ The `.pyi` stubs shipped in the package are the authoritative signatures.
 
 `threads` caps the workers whole-deck calls use; `None` or 0 means every
 core (or `PPTXBOSS_THREADS`), 1 stays on the calling thread. Read back as
-`threads`.
+`threads`. `format` is `"pptx"` or `"ppt"`; a legacy deck has no
+properties, sections, comments or charts and `check()` refuses it.
 
 `slide_count`, `path`, `presentation_part`, `slide_size`, `slide_size_type`;
 `len()`, indexing with negative indexes, iteration; `slide(i)`, `slides()`,

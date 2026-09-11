@@ -1,6 +1,6 @@
 use pptxboss_core::document::Located;
 use pptxboss_core::{Content, Document, Error, TextOptions};
-use pptxboss_testkit::{Deck, DeckSlide, ZipBuilder};
+use pptxboss_testkit::{Deck, DeckSlide, PptDeck, PptSlide, ZipBuilder};
 
 const PNG: &[u8] = &[
     0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
@@ -187,9 +187,13 @@ fn non_presentations_are_refused_with_a_reason() {
         Document::load(b"plain text".to_vec()),
         Err(Error::NotZip)
     ));
-    let mut cfb = vec![0xd0, 0xcf, 0x11, 0xe0];
+    let mut cfb = vec![0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
     cfb.resize(512, 0);
-    assert!(matches!(Document::load(cfb), Err(Error::CompoundFile)));
+    let err = match Document::load(cfb) {
+        Err(err) => err.to_string(),
+        Ok(_) => panic!("a bare compound header is not a deck"),
+    };
+    assert!(err.contains("compound file"), "{err}");
     let zip = pptxboss_testkit::ZipBuilder::new()
         .stored("hello.txt", b"hi")
         .build();
@@ -253,14 +257,14 @@ fn interleaved_pieces_are_reassembled_into_one_part() {
     });
     let doc = Document::load(bytes).unwrap();
     assert_eq!(doc.text(), expected);
-    let part = doc
-        .package()
+    let package = doc.package().expect("a package deck");
+    let part = package
         .parts()
         .iter()
         .find(|part| part.name == "/ppt/slides/slide1.xml")
         .expect("logical part");
     assert_eq!(part.pieces.len(), 3);
-    assert!(doc.package().defects().incomplete_pieces.is_empty());
+    assert!(package.defects().incomplete_pieces.is_empty());
 }
 
 #[test]
@@ -527,4 +531,103 @@ fn markdown_renders_headings_bullets_tables_images_charts_and_notes() {
     assert_eq!(report.hidden_slides_skipped, 1);
     let expected = "## Figures\n\n- Intro\n\n**Chart: Revenue**\n\n|  | 2024 |\n|---|---|\n| Q1 | 10 |\n| Q2 | 12 |\n\n- Plan\n- Build\n  - Test first\n\n---\n\n## Second: details\n\n- Alpha\n- Beta\n\n| Name | Va\\|ue |\n|---|---|\n| Answer | 42 |\n\n![A red square](ppt/media/image1.png)\n\n**Bold** and a [link](https://example.com/a%20b)\n\n  - nested bullet\n\n> **Notes:**\n> Say hello\n";
     assert_eq!(markdown, expected);
+}
+
+fn legacy_deck() -> PptDeck {
+    PptDeck::new()
+        .picture(PNG)
+        .slide(
+            PptSlide::titled("Legacy title")
+                .bullet("First point")
+                .sub_bullet("Detail", 1)
+                .text_box("Free text")
+                .picture(1)
+                .notes("Speaker notes here"),
+        )
+        .slide(PptSlide::titled("Second").bullet("Only one").hidden())
+        .slide(PptSlide::default().text_box("No title at all"))
+}
+
+#[test]
+fn a_legacy_ppt_reads_through_the_same_document_api() {
+    let doc = Document::load(legacy_deck().build()).unwrap();
+    assert!(doc.is_legacy());
+    assert!(doc.package().is_none());
+    assert_eq!(doc.slide_count(), 3);
+    assert_eq!(doc.presentation_part(), "PowerPoint Document");
+    assert_eq!(
+        doc.presentation().slide_size.as_ref().map(|s| (s.cx, s.cy)),
+        Some((9_144_000, 6_858_000))
+    );
+    assert_eq!(doc.defects().located, Located::LegacyStream);
+    let first = doc.slide(0).unwrap();
+    assert_eq!(first.title().as_deref(), Some("Legacy title"));
+    assert_eq!(first.text(), "Legacy title\nFirst point\nDetail\nFree text");
+    let body = first
+        .content
+        .walk()
+        .find(|shape| shape.name == "Body 2")
+        .and_then(|shape| shape.text_body().cloned())
+        .expect("body placeholder");
+    assert_eq!(body.paragraphs[1].level, 1);
+    assert_eq!(
+        first.notes_text().unwrap().as_deref(),
+        Some("Speaker notes here")
+    );
+    let images = first.images().unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].content_type.as_deref(), Some("image/png"));
+    assert_eq!(first.image_bytes(&images[0]).unwrap(), PNG);
+    let picture = first
+        .content
+        .walk()
+        .find(|shape| shape.name == "Picture")
+        .expect("picture shape");
+    assert_eq!(picture.description.as_deref(), Some("A dot"));
+    let second = doc.slide(1).unwrap();
+    assert!(second.is_hidden());
+    assert_eq!(second.text(), "Second\nOnly one");
+    assert!(second.notes_text().unwrap().is_none());
+    let third = doc.slide(2).unwrap();
+    assert_eq!(third.title(), None);
+    assert_eq!(third.text(), "No title at all");
+    let (text, report) = doc.text_reporting(&TextOptions {
+        notes: true,
+        hidden_slides: false,
+        ..TextOptions::default()
+    });
+    assert!(report.is_complete());
+    assert_eq!(report.hidden_slides_skipped, 1);
+    assert_eq!(
+        text,
+        "Legacy title\nFirst point\nDetail\nFree text\nSpeaker notes here\n\nNo title at all"
+    );
+    let (markdown, _) = doc.markdown(&pptxboss_core::MarkdownOptions::default());
+    assert!(
+        markdown.starts_with(
+            "## Legacy title\n\n- First point\n  - Detail\n\nFree text\n\n![A dot](Pictures/1)"
+        ),
+        "{markdown}"
+    );
+    assert!(first.comments().unwrap().is_empty());
+    assert!(first.charts().unwrap().is_empty());
+    assert!(doc.core_properties().unwrap().is_none());
+    assert!(doc.sections().is_empty());
+}
+
+#[test]
+fn compound_files_that_are_not_presentations_are_refused_with_a_reason() {
+    let other = pptxboss_testkit::compound_file(&[("WordDocument", b"not a deck")]);
+    assert!(matches!(
+        Document::load(other),
+        Err(Error::NoPresentationStream)
+    ));
+    let encrypted = pptxboss_testkit::compound_file(&[
+        ("EncryptionInfo", &[4u8, 0, 4, 0, 0x40, 0, 0, 0]),
+        ("EncryptedPackage", &[0u8; 16]),
+    ]);
+    assert!(matches!(
+        Document::load(encrypted),
+        Err(Error::Encrypted(_))
+    ));
 }

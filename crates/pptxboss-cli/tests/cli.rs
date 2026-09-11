@@ -210,3 +210,25 @@ fn markdown_command_renders_the_deck() {
     assert!(text.contains("Figures\nPlan\nBuild\nTest first"), "{text}");
     assert!(!text.contains("Revenue"));
 }
+
+#[test]
+fn legacy_ppt_files_read_and_check_refuses_them() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/legacy.ppt");
+    let (code, stdout, stderr) = run(&["info", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.contains("format:       ppt"), "{stdout}");
+    assert!(
+        stdout.contains("   1  Legacy title [notes, pictures]"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("   2  Second [hidden]"), "{stdout}");
+    let (code, text, _) = run(&["text", "--notes", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(
+        text.starts_with("Legacy title\nFirst point\nDetail\nFree text\nSpeaker notes here\n"),
+        "{text}"
+    );
+    let (code, _, stderr) = run(&["check", path.to_str().unwrap()]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("compound file"), "{stderr}");
+}

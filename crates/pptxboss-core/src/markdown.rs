@@ -197,6 +197,19 @@ impl Slide<'_> {
                             .unwrap_or_else(|| rel.target.clone()),
                     })
                     .unwrap_or_default();
+                let target = match target.is_empty() {
+                    false => target,
+                    true => self
+                        .images()
+                        .ok()
+                        .and_then(|images| {
+                            images
+                                .into_iter()
+                                .find(|image| image.shape_id == shape.id)
+                                .and_then(|image| image.part)
+                        })
+                        .unwrap_or_default(),
+                };
                 let alt = description.unwrap_or_else(|| collapse_whitespace(&shape.name));
                 Some(format!(
                     "![{}]({})",

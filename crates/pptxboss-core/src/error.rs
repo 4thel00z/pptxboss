@@ -18,9 +18,15 @@ pub enum Error {
     /// No end of central directory record: the bytes are not a ZIP archive.
     #[error("not a zip archive")]
     NotZip,
-    /// An OLE compound file: an encrypted package or a legacy binary .ppt.
-    #[error("compound file container: encrypted package or legacy binary presentation")]
+    /// An OLE compound file where an ECMA-376 package was required.
+    #[error("compound file: a legacy .ppt or an encrypted package, not an ECMA-376 package")]
     CompoundFile,
+    /// An OLE compound file with no presentation inside.
+    #[error("compound file holds no PowerPoint Document stream")]
+    NoPresentationStream,
+    /// A password-protected document; the reader does not decrypt it.
+    #[error("encrypted: {0}")]
+    Encrypted(String),
     /// A structurally broken ZIP record at the given byte offset.
     #[error("zip: {msg} at offset {offset}")]
     Zip { offset: u64, msg: String },

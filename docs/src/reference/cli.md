@@ -1,7 +1,7 @@
 # CLI reference
 
-Every command takes a path. Warnings go to stderr as `warning:` lines;
-errors as `error:` lines. Exit code 1 means the input could not be read,
+Every command takes a path to a `.pptx` (or `.ppt`, except `check`).
+Warnings go to stderr as `warning:` lines; errors as `error:` lines. Exit code 1 means the input could not be read,
 2 means bad usage, except for `check`, which uses 1 for findings at error
 severity and 2 for an unreadable file.
 
@@ -12,8 +12,9 @@ calling thread.
 
 ## `pptxboss info FILE [--json]`
 
-Slide count, presentation part, slide size in EMU and inches with its
-declared type, master count, part count, the core properties that are set
+Format (`pptx` or `ppt`), slide count, presentation part, slide size in EMU
+and inches with its declared type, master count, part count, the core
+properties that are set
 (title, subject, creator, modified by, created, modified, application),
 one `section:` line per section with its slide numbers, then one line per
 slide: number, title or `(no title)`, and flags among `hidden`, `notes`,

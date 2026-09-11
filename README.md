@@ -1,7 +1,7 @@
 <h1 align="center">pptxboss</h1>
 
 <p align="center">
-  <strong>A PowerPoint engine written from scratch in Rust: read .pptx decks, extract text, notes, tables and images, verify them against ECMA-376. One core, a CLI, and pythonic bindings.</strong>
+  <strong>A PowerPoint engine written from scratch in Rust: read .pptx and legacy .ppt decks, extract text, notes, tables, charts and images, render Markdown, verify against ECMA-376, create decks. One core, a CLI, and pythonic bindings.</strong>
 </p>
 
 <p align="center">
@@ -63,6 +63,10 @@ skips what it cannot read instead of refusing, reporting every skip.
   ([benchmarks](#benchmarks)).
 - **Reads Strict decks**: the Open XML SDK's Strict-namespace test decks,
   which most readers refuse, read and verify like any other.
+- **Reads legacy `.ppt` too**: the PowerPoint 97-2003 binary format
+  (compound file, persist directory, OfficeArt drawings) is read from the
+  MS-CFB, MS-PPT and MS-ODRAW specifications into the same slide model, so
+  every command and API works on it unchanged.
 
 ## Install
 
@@ -216,6 +220,13 @@ In-process, the 43-slide deck opens in 1.4 ms with positioned reads,
 tokenizes its 443 KiB of slide XML in about 4 ms, and yields its text in
 11.5 ms on one thread and 4.2 ms on twelve.
 
+Legacy `.ppt` decks: over the 153 readable files of the LibreOffice and
+Apache POI `.ppt` test suites (41 MB), the same harness reads text with
+pptxboss in 22 ms against 58 ms for office-oxide, best of 3 per file. The
+words agree on 87 of the 89 decks with real content; the other two have a
+broken user-edit chain that pptxboss recovers only partially. office-oxide
+includes master placeholder text, pptxboss never does.
+
 The gate compares pptxboss against python-pptx only, because the other
 engines do not expose per-slide paragraphs. Numbers are machine-dependent;
 reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
@@ -228,7 +239,7 @@ reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
 
 | Crate | What it does |
 |---|---|
-| `pptxboss-core` | ZIP container with positioned reads, DEFLATE decoder, CRC-32, XML pull tokenizer, OPC package model, PresentationML document model, charts, diagrams, comments, properties, text and Markdown extraction |
+| `pptxboss-core` | ZIP container with positioned reads, DEFLATE decoder, CRC-32, XML pull tokenizer, OPC package model, PresentationML document model, charts, diagrams, comments, properties, text and Markdown extraction; compound-file container and the PowerPoint 97-2003 binary reader |
 | `pptxboss-check` | The verifier: 72 clause-numbered rules over package and presentation structure |
 | `pptxboss-write` | Creates decks: titles, bullets, paragraphs, text boxes, tables, pictures, notes; Markdown to slides; deterministic output that verifies clean |
 | `pptxboss-cli` | The `pptxboss` binary |
@@ -237,8 +248,11 @@ reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
 
 ## Limitations
 
-- Encrypted packages (OLE compound files with `EncryptionInfo`) and legacy
-  binary `.ppt` files are detected and refused with a clear error, not read.
+- Password-protected files (encrypted packages and encrypted `.ppt`) are
+  detected and refused with a clear error, not decrypted.
+- Legacy `.ppt` decks give their text, titles, notes, hidden flags, slide
+  size and pictures; the verifier covers ECMA-376 packages only, so `check`
+  refuses them. PowerPoint 95 files are refused.
 - Interleaved ("piece") items are reassembled, but no public test deck uses
   them; the only evidence is the testkit fixture built from the OPC text.
 - No rendering of slides to images.
