@@ -371,7 +371,9 @@ impl Document {
         self.threads
     }
 
-    /// Limits [`Document::map_slides`] to `threads` workers; 0 restores every core.
+    /// Limits [`Document::map_slides`] to `threads` workers; 0 restores every
+    /// core for a package and the calling thread for a legacy deck, whose
+    /// slides are too cheap to spread.
     pub fn set_threads(&mut self, threads: usize) {
         self.threads = threads;
     }
@@ -491,6 +493,9 @@ impl Document {
 
     /// Workers for `count` slides under the configured limit.
     fn worker_count(&self, count: usize) -> usize {
+        if self.threads == 0 && self.is_legacy() {
+            return 1;
+        }
         let limit = match self.threads {
             0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
             limit => limit,

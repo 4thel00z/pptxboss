@@ -191,7 +191,7 @@
     },
     {
       "file": "openxml-sdk__encrypted_pptx.pptx",
-      "reason": "pptxboss failed: PptxError: compound file container: encrypted package or legacy binary presentation"
+      "reason": "pptxboss failed: PptxError: encrypted: package encrypted with a password"
     },
     {
       "file": "openxml-sdk__err_mainEndParaRpr_SpellingError.pptx",
@@ -387,7 +387,7 @@
     },
     {
       "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-4838644450394112.pptx",
-      "reason": "python-pptx failed: PackageNotFoundError"
+      "reason": "report: slide 1: chart or diagram unreadable: xml in /ppt/diagrams/data1.xml at byte 5156: end tag does not match the open element"
     },
     {
       "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-4986044400861184.pptx",
@@ -407,7 +407,7 @@
     },
     {
       "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6071540680032256.pptx",
-      "reason": "python-pptx failed: PackageNotFoundError"
+      "reason": "report: slide 1: chart or diagram unreadable: inflate: truncated deflate stream"
     },
     {
       "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6254434927378432.pptx",
@@ -419,7 +419,7 @@
     },
     {
       "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6435650376957952.pptx",
-      "reason": "python-pptx failed: BadZipFile"
+      "reason": "report: slide 1: chart or diagram unreadable: inflate: truncated deflate stream"
     },
     {
       "file": "poi__crash-57308ca363f5b71763c489d1b432aff009d4bc4f.pptx",
@@ -428,46 +428,46 @@
   ],
   "engines": {
     "pptxboss": {
-      "total_seconds": 0.562879009230528,
+      "total_seconds": 0.0639462748367805,
       "files": 631,
-      "slides_per_second": 2433.9155973729235,
-      "files_per_second": 1121.0224393739525
+      "slides_per_second": 21424.234695404117,
+      "files_per_second": 9867.658461897809
     },
     "pptxboss-1t": {
-      "total_seconds": 0.5940088905917946,
+      "total_seconds": 0.07945404795464128,
       "files": 631,
-      "slides_per_second": 2306.3627863130246,
-      "files_per_second": 1062.2736628930793
+      "slides_per_second": 17242.670893018636,
+      "files_per_second": 7941.697323718801
     },
     "office-oxide": {
-      "total_seconds": 1.7902544092794415,
+      "total_seconds": 0.19950301069184206,
       "files": 631,
-      "slides_per_second": 765.2543643511598,
-      "files_per_second": 352.46387146392834
-    },
-    "undoc": {
-      "total_seconds": 3.0562433446466457,
-      "files": 631,
-      "slides_per_second": 448.2627348374302,
-      "files_per_second": 206.4626172864368
+      "slides_per_second": 6867.064287646968,
+      "files_per_second": 3162.8595368651368
     },
     "kreuzberg": {
-      "total_seconds": 3.8347171299683396,
+      "total_seconds": 0.3381882053508889,
       "files": 631,
-      "slides_per_second": 357.2623360647493,
-      "files_per_second": 164.5492949320123
+      "slides_per_second": 4050.9987584532983,
+      "files_per_second": 1865.8249756087819
+    },
+    "undoc": {
+      "total_seconds": 0.3446206159715075,
+      "files": 631,
+      "slides_per_second": 3975.3860811196178,
+      "files_per_second": 1830.9989906470648
     },
     "python-pptx": {
-      "total_seconds": 15.379154471942456,
+      "total_seconds": 1.2925445807049982,
       "files": 631,
-      "slides_per_second": 89.08162035171775,
-      "files_per_second": 41.02956382622912
+      "slides_per_second": 1059.9247565238754,
+      "files_per_second": 488.1843221653762
     },
     "markitdown": {
-      "total_seconds": 121.11221271654358,
+      "total_seconds": 8.86935776923201,
       "files": 631,
-      "slides_per_second": 11.311823715139356,
-      "files_per_second": 5.210044353469295
+      "slides_per_second": 154.46439704490882,
+      "files_per_second": 71.14382082871347
     }
   }
 }

@@ -56,17 +56,18 @@ skips what it cannot read instead of refusing, reporting every skip.
   finding carries a stable code, a severity and the clause it enforces.
   Real PowerPoint output verifies clean; the rules were calibrated against
   790 public test decks.
-- **Fastest measured**: 1,121 files/s extracting text over a 631-file
-  public corpus, and 1,062 files/s when held to one thread: about 3x the
-  next fastest Rust engine either way and 27x the most-used Python library,
-  with paragraph-for-paragraph agreement on every gated file
+- **Fastest measured**: 9,868 files/s extracting text over a 631-file
+  public corpus, and 7,942 files/s when held to one thread: 3.1x and 2.5x
+  the next fastest Rust engine, 16x to 20x the most-used Python library,
+  with chart and SmartArt text included that no other engine measured
+  produces, and paragraph-for-paragraph agreement on every gated file
   ([benchmarks](#benchmarks)).
 - **Reads Strict decks**: the Open XML SDK's Strict-namespace test decks,
   which most readers refuse, read and verify like any other.
 - **Reads legacy `.ppt` too**: the PowerPoint 97-2003 binary format
   (compound file, persist directory, OfficeArt drawings) is read from the
   MS-CFB, MS-PPT and MS-ODRAW specifications into the same slide model, so
-  every command and API works on it unchanged.
+  every reading command and API works on it unchanged.
 
 ## Install
 
@@ -171,8 +172,9 @@ through `pptxboss-core`, and passes `pptxboss check` with no findings.
 ## Benchmarks
 
 **pptxboss is the fastest library measured, on one thread as well as on
-all cores: about 3x the next fastest Rust engine and 27x python-pptx, with
-paragraph-for-paragraph agreement on every file that passes the gate.**
+all cores: 2.5x to 3x the next fastest Rust engine and 16x to 20x
+python-pptx, with paragraph-for-paragraph agreement on every file that
+passes the gate.**
 
 Text extraction from Python over the 737 `.pptx` files of the LibreOffice,
 Apache POI, python-pptx, pandoc and Open XML SDK test suites, best of 3 per
@@ -186,13 +188,13 @@ pptxboss reports as unreadable.
 
 | Library | files/s | slides/s |
 |---|--:|--:|
-| pptxboss, all cores | 1,121 | 2,434 |
-| pptxboss, one thread (`threads=1`) | 1,062 | 2,306 |
-| office-oxide | 352 | 765 |
-| undoc | 207 | 448 |
-| kreuzberg | 165 | 357 |
-| python-pptx | 41 | 89 |
-| markitdown | 5.2 | 11 |
+| pptxboss, all cores | 9,868 | 21,424 |
+| pptxboss, one thread (`threads=1`) | 7,942 | 17,243 |
+| office-oxide | 3,163 | 6,867 |
+| kreuzberg | 1,866 | 4,051 |
+| undoc | 1,831 | 3,975 |
+| python-pptx | 488 | 1,060 |
+| markitdown | 71 | 154 |
 
 <details>
 <summary>Method and fine print</summary>
@@ -201,7 +203,10 @@ Every engine is called from Python through its own adapter. pptxboss
 spreads a deck's slides across cores unless `threads=1` holds it to the
 calling thread; the one-thread row is the like-for-like comparison, since
 the other Rust engines run one thread per file (office-oxide's wheel was
-measured at 0.9 to 1.1 CPU seconds per wall second). The test-suite corpus
+measured at 0.9 to 1.1 CPU seconds per wall second). The pptxboss rows
+include chart and SmartArt text, which none of the other engines produce;
+on this corpus that costs pptxboss 13% of its one-thread time, and
+`text(charts=False, diagrams=False)` leaves it out. The test-suite corpus
 is small files, so the rows are dominated by per-file cost: opening the
 file, one positioned read for the whole archive when it is small, parsing
 the directory, the relationships and a few slides.
@@ -211,25 +216,30 @@ same harness, best of 40:
 
 | Deck | office-oxide | pptxboss, one thread | pptxboss, all cores |
 |---|--:|--:|--:|
-| 43 slides, wall | 36.5 ms | 10.8 ms | 3.9 ms |
-| 43 slides, CPU | 39.0 ms | 12.1 ms | 13.7 ms |
-| 7 slides, wall | 9.0 ms | 2.4 ms | 1.7 ms |
-| 7 slides, CPU | 9.8 ms | 2.6 ms | 4.0 ms |
+| 43 slides, wall | 4.89 ms | 1.38 ms | 0.44 ms |
+| 43 slides, CPU | 5.19 ms | 1.41 ms | 2.60 ms |
+| 7 slides, wall | 1.05 ms | 0.28 ms | 0.16 ms |
+| 7 slides, CPU | 1.10 ms | 0.28 ms | 0.52 ms |
 
-In-process, the 43-slide deck opens in 1.4 ms with positioned reads,
-tokenizes its 443 KiB of slide XML in about 4 ms, and yields its text in
-11.5 ms on one thread and 4.2 ms on twelve.
+In-process, the 43-slide deck opens in 0.13 ms with positioned reads,
+tokenizes its 443 KiB of slide XML in 0.6 ms, and yields its text in
+1.5 ms on one thread and 0.5 ms on twelve.
 
 Legacy `.ppt` decks: over the 153 readable files of the LibreOffice and
 Apache POI `.ppt` test suites (41 MB), the same harness reads text with
-pptxboss in 22 ms against 58 ms for office-oxide, best of 3 per file. The
+pptxboss in 15 ms against 61 ms for office-oxide, best of 3 per file, both
+on one thread: a legacy deck stays on the calling thread by default, since
+spreading its slides across cores measured slower on 146 of 152 decks. The
 words agree on 87 of the 89 decks with real content; the other two have a
 broken user-edit chain that pptxboss recovers only partially. office-oxide
 includes master placeholder text, pptxboss never does.
 
 The gate compares pptxboss against python-pptx only, because the other
-engines do not expose per-slide paragraphs. Numbers are machine-dependent;
-reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
+engines do not expose per-slide paragraphs. Absolute numbers depend on
+the machine and on the cores macOS schedules the process on: an earlier
+session on the same machine gave every engine 7x to 9x lower rates with
+the ratios between engines within 20% of these. Reproduce with
+[`benchmarks/bench.py`](benchmarks/README.md) after
 `benchmarks/corpora/fetch_public.sh`. Engine versions are recorded in
 `benchmarks/results.json`.
 
@@ -251,8 +261,10 @@ reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
 - Password-protected files (encrypted packages and encrypted `.ppt`) are
   detected and refused with a clear error, not decrypted.
 - Legacy `.ppt` decks give their text, titles, notes, hidden flags, slide
-  size and pictures; the verifier covers ECMA-376 packages only, so `check`
-  refuses them. PowerPoint 95 files are refused.
+  size and pictures, and are read whole into memory; their tables, charts,
+  comments and properties are not read, the verifier covers ECMA-376
+  packages only, so `check` refuses them, and PowerPoint 95 files are
+  refused.
 - Interleaved ("piece") items are reassembled, but no public test deck uses
   them; the only evidence is the testkit fixture built from the OPC text.
 - No rendering of slides to images.

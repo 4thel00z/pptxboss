@@ -23,15 +23,18 @@ Engines: pptxboss (all cores), pptxboss-1t (`Document(path, threads=1)`,
 one thread), office-oxide, undoc, kreuzberg, python-pptx, markitdown. The
 other engines run one thread per file; office-oxide's wheel was measured
 at 0.9 to 1.1 CPU seconds per wall second, so the pptxboss-1t row is the
-like-for-like comparison.
+like-for-like comparison. Both pptxboss rows include chart and SmartArt
+text, which the other engines do not produce.
 
 Last run (2026-09-11, Apple M3 Pro, `--repeat 3`, 737 files, 636 gated,
-631 common, 1,370 slides): pptxboss 1,121.0 files/s; pptxboss-1t 1,062.3;
-office-oxide 352.5; undoc 206.5; kreuzberg 164.5; python-pptx 41.0;
-markitdown 5.2. No file was excluded for a paragraph disagreement;
-`results.json` lists every exclusion with its reason. Rates move with the
-machine's state from run to run (an earlier run the same day gave every
-engine about 15% higher numbers); the ratios between engines hold.
+631 common, 1,370 slides): pptxboss 9,867.7 files/s; pptxboss-1t 7,941.7;
+office-oxide 3,162.9; kreuzberg 1,865.8; undoc 1,831.0; python-pptx 488.2;
+markitdown 71.1. No file was excluded for a paragraph disagreement;
+`results.json` lists every exclusion with its reason. Absolute rates
+depend on the cores macOS schedules the process on: an earlier session the
+same day gave every engine 7x to 9x lower numbers, two runs in one session
+differ by a few percent, and the ratios between engines hold within about
+20%.
 
 ## Corpus
 

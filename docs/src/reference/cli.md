@@ -8,7 +8,7 @@ severity and 2 for an unreadable file.
 `--threads N`, before or after the subcommand, caps the worker threads
 used to parse slides; the default is every core, or the value of
 `PPTXBOSS_THREADS` when that is set. `--threads 1` keeps everything on the
-calling thread.
+calling thread, which is also the default for a legacy `.ppt` deck.
 
 ## `pptxboss info FILE [--json]`
 
