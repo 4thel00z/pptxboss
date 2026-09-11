@@ -60,6 +60,10 @@ pub enum Ns {
     Pic,
     /// The `xml:` namespace.
     Xml,
+    /// PowerPoint 2010 extensions (`p14:`), among them sections.
+    P14,
+    /// PowerPoint 2018 extensions (`p188:`): threaded comments and their authors.
+    P188,
     /// Any other namespace, numbered per reader in order of first sight.
     Other(u16),
 }
@@ -190,6 +194,16 @@ const KNOWN: &[(&[u8], Ns, Conformance)] = &[
     (
         b"http://www.w3.org/XML/1998/namespace",
         Ns::Xml,
+        Conformance::Transitional,
+    ),
+    (
+        b"http://schemas.microsoft.com/office/powerpoint/2010/main",
+        Ns::P14,
+        Conformance::Transitional,
+    ),
+    (
+        b"http://schemas.microsoft.com/office/powerpoint/2018/8/main",
+        Ns::P188,
         Conformance::Transitional,
     ),
 ];

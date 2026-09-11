@@ -29,10 +29,40 @@ class Document:
     def __iter__(self) -> SlideIter: ...
     def slide(self, index: int) -> Slide: ...
     def slides(self) -> list[Slide]: ...
-    def text(self, *, notes: bool = False, furniture: bool = False, hidden_shapes: bool = False, hidden_slides: bool = True) -> str: ...
-    def text_reporting(self, *, notes: bool = False, furniture: bool = False, hidden_shapes: bool = False, hidden_slides: bool = True) -> tuple[str, list[str]]: ...
-    def slide_texts(self, *, notes: bool = False, furniture: bool = False, hidden_shapes: bool = False, hidden_slides: bool = True) -> list[str]: ...
+    def text(
+        self,
+        *,
+        notes: bool = False,
+        furniture: bool = False,
+        hidden_shapes: bool = False,
+        hidden_slides: bool = True,
+        alt_text: bool = False,
+        comments: bool = False,
+    ) -> str: ...
+    def text_reporting(
+        self,
+        *,
+        notes: bool = False,
+        furniture: bool = False,
+        hidden_shapes: bool = False,
+        hidden_slides: bool = True,
+        alt_text: bool = False,
+        comments: bool = False,
+    ) -> tuple[str, list[str]]: ...
+    def slide_texts(
+        self,
+        *,
+        notes: bool = False,
+        furniture: bool = False,
+        hidden_shapes: bool = False,
+        hidden_slides: bool = True,
+        alt_text: bool = False,
+        comments: bool = False,
+    ) -> list[str]: ...
     def titles(self) -> list[str | None]: ...
+    def core_properties(self) -> CoreProperties | None: ...
+    def app_properties(self) -> AppProperties | None: ...
+    def sections(self) -> list[Section]: ...
 
 class SlideIter(Iterator[Slide]):
     def __iter__(self) -> SlideIter: ...
@@ -55,9 +85,12 @@ class Slide:
     def title(self) -> str | None: ...
     @property
     def warnings(self) -> list[str]: ...
-    def text(self, *, furniture: bool = False, hidden_shapes: bool = False) -> str: ...
+    def text(self, *, furniture: bool = False, hidden_shapes: bool = False, alt_text: bool = False) -> str: ...
     def paragraphs(self) -> list[str]: ...
     def notes(self) -> str | None: ...
+    def comments(self) -> list[Comment]: ...
+    def embedded_objects(self) -> list[EmbeddedObject]: ...
+    def object_bytes(self, object: EmbeddedObject) -> bytes: ...
     def tables(self) -> list[list[list[str]]]: ...
     def shapes(self) -> list[Shape]: ...
     def images(self) -> list[Image]: ...
@@ -83,6 +116,67 @@ class Shape:
     children: list[Shape]
     @property
     def is_title(self) -> bool: ...
+
+class CoreProperties:
+    """The Core Properties part (docProps/core.xml), every field optional text."""
+
+    title: str | None
+    subject: str | None
+    creator: str | None
+    keywords: str | None
+    description: str | None
+    last_modified_by: str | None
+    revision: str | None
+    created: str | None
+    modified: str | None
+    last_printed: str | None
+    category: str | None
+    content_status: str | None
+    language: str | None
+    identifier: str | None
+    version: str | None
+
+class AppProperties:
+    """The Extended Properties part (docProps/app.xml)."""
+
+    application: str | None
+    app_version: str | None
+    company: str | None
+    manager: str | None
+    template: str | None
+    presentation_format: str | None
+    slides: int | None
+    notes: int | None
+    hidden_slides: int | None
+    words: int | None
+    paragraphs: int | None
+    total_time: int | None
+    titles_of_parts: list[str]
+
+class Section:
+    """A section of the slide list; `slides` holds zero-based slide indexes."""
+
+    name: str
+    slides: list[int]
+
+class Comment:
+    """A comment on a slide; replies follow their parent with `reply` set."""
+
+    author: str | None
+    initials: str | None
+    date: str | None
+    text: str
+    reply: bool
+
+class EmbeddedObject:
+    """An embedded object (p:oleObj) on a slide."""
+
+    shape_id: int
+    prog_id: str | None
+    rel_id: str | None
+    part: str | None
+    content_type: str | None
+    external: str | None
 
 class Image:
     """An image referenced from a slide."""

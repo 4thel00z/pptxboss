@@ -20,3 +20,8 @@ def three_slides_pptx() -> Path:
 @pytest.fixture
 def shapes_pptx() -> Path:
     return FIXTURES / "shapes.pptx"
+
+
+@pytest.fixture
+def features_pptx() -> Path:
+    return FIXTURES / "features.pptx"

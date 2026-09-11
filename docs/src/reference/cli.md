@@ -13,14 +13,20 @@ calling thread.
 ## `pptxboss info FILE [--json]`
 
 Slide count, presentation part, slide size in EMU and inches with its
-declared type, master count, part count, then one line per slide: number,
-title or `(no title)`, and flags among `hidden`, `notes`, `pictures`,
-`tables`. A slide that fails to parse shows `(unreadable: reason)`.
+declared type, master count, part count, the core properties that are set
+(title, subject, creator, modified by, created, modified, application),
+one `section:` line per section with its slide numbers, then one line per
+slide: number, title or `(no title)`, and flags among `hidden`, `notes`,
+`pictures`, `tables`, `objects`, `comments`. A slide that fails to parse
+shows `(unreadable: reason)`.
 
-## `pptxboss text FILE [--notes] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
+## `pptxboss text FILE [--notes] [--comments] [--alt-text] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
 
 Slide text, slides separated by a blank line; empty slides are skipped
-unless `--headings` or `--json` is given.
+unless `--headings` or `--json` is given. `--comments` appends
+`[comment] Author: text` lines (replies as `[reply]`) after a slide's text
+and notes; `--alt-text` adds the alternative text of pictures and other
+shapes that have no text.
 
 ## `pptxboss check FILE [--json] [--quiet] [--max-findings N] [--no-crc]`
 

@@ -14,6 +14,10 @@ pub struct TextOptions {
     pub hidden_slides: bool,
     /// Include speaker notes after each slide's text.
     pub notes: bool,
+    /// Include the alternative text (`cNvPr/@descr`) of shapes that have no text of their own.
+    pub alt_text: bool,
+    /// Include the slide's comments after its text and notes.
+    pub comments: bool,
     /// Separator between table cells of one row.
     pub cell_separator: String,
 }
@@ -25,6 +29,8 @@ impl Default for TextOptions {
             hidden_shapes: false,
             hidden_slides: true,
             notes: false,
+            alt_text: false,
+            comments: false,
             cell_separator: "\t".to_string(),
         }
     }
@@ -50,6 +56,9 @@ pub fn write_content_text(content: &SlideContent, options: &TextOptions, out: &m
         }
         let start = out.len();
         write_shape_text(shape, options, out);
+        if out.len() == start && options.alt_text {
+            write_alt_text(shape, out);
+        }
         if out.len() == start {
             continue;
         }
@@ -88,6 +97,21 @@ fn write_shape_text(shape: &Shape, options: &TextOptions, out: &mut String) {
     }
 }
 
+/// The alternative text of a shape that carries content but no text of its
+/// own: pictures, charts, diagrams, embedded objects, empty text shapes.
+fn write_alt_text(shape: &Shape, out: &mut String) {
+    if matches!(shape.content, Content::Group(..) | Content::Connector) {
+        return;
+    }
+    let Some(description) = shape.description.as_deref().map(str::trim) else {
+        return;
+    };
+    if description.is_empty() {
+        return;
+    }
+    out.push_str(description);
+}
+
 fn write_body(body: &TextBody, out: &mut String) {
     if body.is_empty() {
         return;
@@ -102,6 +126,8 @@ pub struct ExtractReport {
     pub failed_slides: Vec<(usize, String)>,
     /// Notes parts that could not be read or parsed.
     pub failed_notes: Vec<(usize, String)>,
+    /// Comments parts that could not be read or parsed.
+    pub failed_comments: Vec<(usize, String)>,
     /// Hidden slides left out because the options excluded them.
     pub hidden_slides_skipped: u32,
     /// Graphic frames whose content type the reader does not understand.
@@ -115,7 +141,10 @@ pub struct ExtractReport {
 impl ExtractReport {
     /// True when nothing was dropped for a reason other than the options.
     pub fn is_complete(&self) -> bool {
-        self.failed_slides.is_empty() && self.failed_notes.is_empty() && self.unknown_graphics == 0
+        self.failed_slides.is_empty()
+            && self.failed_notes.is_empty()
+            && self.failed_comments.is_empty()
+            && self.unknown_graphics == 0
     }
 
     /// One line per problem, suitable for a warning stream.
@@ -126,6 +155,9 @@ impl ExtractReport {
         }
         for (index, err) in &self.failed_notes {
             lines.push(format!("slide {}: notes unreadable: {err}", index + 1));
+        }
+        for (index, err) in &self.failed_comments {
+            lines.push(format!("slide {}: comments unreadable: {err}", index + 1));
         }
         if self.unknown_graphics > 0 {
             lines.push(format!(

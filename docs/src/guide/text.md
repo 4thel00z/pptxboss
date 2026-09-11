@@ -66,6 +66,17 @@ nothing was dropped for a reason other than the options.
 
 ## Encodings
 
-Parts are UTF-8. A UTF-16 part is reported and skipped. Text uses the
-`_xHHHH_` escape convention for control characters, which the reader
-decodes.
+Parts are UTF-8 or UTF-16; a UTF-16 part (byte order mark or `<?` in
+either byte order) is transcoded before parsing, and the verifier notes it.
+Text uses the `_xHHHH_` escape convention for control characters, which
+the reader decodes.
+
+## Comments and alternative text
+
+`TextOptions::comments` appends each slide's comments after its text and
+notes, one line each: `[comment] Author: text`, replies indented as
+`[reply]`. `TextOptions::alt_text` emits the `descr` of shapes that have
+no text of their own (pictures, charts, diagrams, embedded objects). Both
+are off by default so extracted text stays paragraph-for-paragraph
+comparable with the slide content. `Slide::comments` returns the same
+comments structured, with author, initials and date.

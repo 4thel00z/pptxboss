@@ -51,6 +51,12 @@ enum Command {
         /// Leave out slides marked hidden.
         #[arg(long)]
         skip_hidden: bool,
+        /// Include the alternative text of pictures and other shapes without text.
+        #[arg(long)]
+        alt_text: bool,
+        /// Append each slide's comments after its text and notes.
+        #[arg(long)]
+        comments: bool,
         /// Print a `--- slide N ---` heading before each slide.
         #[arg(long)]
         headings: bool,
@@ -126,6 +132,8 @@ fn main() -> ExitCode {
             furniture,
             hidden_shapes,
             skip_hidden,
+            alt_text,
+            comments,
             headings,
             json,
         } => {
@@ -134,6 +142,8 @@ fn main() -> ExitCode {
                 furniture,
                 hidden_shapes,
                 hidden_slides: !skip_hidden,
+                alt_text,
+                comments,
                 ..TextOptions::default()
             };
             open(&file, threads).and_then(|doc| text::run(&doc, &options, headings, json))

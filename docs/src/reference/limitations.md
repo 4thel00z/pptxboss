@@ -2,10 +2,10 @@
 
 - Encrypted packages and legacy binary `.ppt` files are OLE compound files;
   they are detected and refused, not read.
-- UTF-16 encoded XML parts are reported and skipped.
-- Interleaved ZIP items (`[n].piece`) are not reassembled.
-- Charts, diagrams and embedded objects are recognized and skipped; their
-  text is not extracted.
+- Interleaved ZIP items (`[n].piece`) are reassembled, but no public test
+  deck contains them; the testkit fixture is the only evidence.
+- Charts and diagrams are recognized and skipped; their text is not
+  extracted. Embedded objects are listed with their bytes, not interpreted.
 - Text formatting beyond bold, italic, underline, strike, size, language,
   typeface and hyperlinks is not modelled.
 - Placeholder inheritance of formatting from layouts and masters is not

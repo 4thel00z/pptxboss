@@ -38,6 +38,8 @@ pub mod content_type {
         "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml";
     pub const COMMENTS: &str =
         "application/vnd.openxmlformats-officedocument.presentationml.comments+xml";
+    pub const MODERN_COMMENTS: &str = "application/vnd.ms-powerpoint.comments+xml";
+    pub const AUTHORS: &str = "application/vnd.ms-powerpoint.authors+xml";
     pub const TAGS: &str = "application/vnd.openxmlformats-officedocument.presentationml.tags+xml";
     pub const THEME: &str = "application/vnd.openxmlformats-officedocument.theme+xml";
     pub const THEME_OVERRIDE: &str =
@@ -71,6 +73,8 @@ const TRANSITIONAL_PREFIX: &str =
 const STRICT_PREFIX: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships/";
 const PACKAGE_PREFIX: &str = "http://schemas.openxmlformats.org/package/2006/relationships/";
 const MS_MEDIA: &str = "http://schemas.microsoft.com/office/2007/relationships/media";
+const MS_COMMENTS: &str = "http://schemas.microsoft.com/office/2018/10/relationships/comments";
+const MS_AUTHORS: &str = "http://schemas.microsoft.com/office/2018/10/relationships/authors";
 
 /// The relationship types a reader dispatches on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -88,6 +92,10 @@ pub enum RelKind {
     TableStyles,
     CommentAuthors,
     Comments,
+    /// The 2018 threaded comments part (`p188:cmLst`).
+    ModernComments,
+    /// The authors part of the 2018 comments.
+    Authors,
     Tags,
     Theme,
     ThemeOverride,
@@ -170,9 +178,11 @@ impl RelKind {
                 _ => RelKind::Other,
             };
         }
-        match rel_type == MS_MEDIA {
-            true => RelKind::Media,
-            false => RelKind::Other,
+        match rel_type {
+            MS_MEDIA => RelKind::Media,
+            MS_COMMENTS => RelKind::ModernComments,
+            MS_AUTHORS => RelKind::Authors,
+            _ => RelKind::Other,
         }
     }
 
@@ -207,6 +217,8 @@ impl RelKind {
             RelKind::Audio => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio",
             RelKind::Video => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video",
             RelKind::Media => MS_MEDIA,
+            RelKind::ModernComments => MS_COMMENTS,
+            RelKind::Authors => MS_AUTHORS,
             RelKind::Font => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font",
             RelKind::PrinterSettings => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings",
             RelKind::VmlDrawing => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing",

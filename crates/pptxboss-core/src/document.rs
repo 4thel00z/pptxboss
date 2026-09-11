@@ -9,14 +9,16 @@
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use crate::comments::{parse_authors, parse_comments, Comment, CommentAuthor};
 use crate::error::{Error, Result};
 use crate::model::{Content, PlaceholderKind, SlideContent, TextBody};
 use crate::opc::{Relationships, TargetMode};
 use crate::package::{Package, PackageSeed};
 use crate::pml::{content_type, RelKind};
 use crate::presentation::Presentation;
+use crate::properties::{AppProperties, CoreProperties};
 use crate::slide::{parse_slide, SlideReport};
 use crate::text::{write_content_text, ExtractReport, TextOptions};
 
@@ -58,6 +60,31 @@ struct Shared {
     slides: Vec<SlideRef>,
     defects: DocumentDefects,
     package: PackageSeed,
+    /// Comment authors of both flavours, read on first use.
+    authors: OnceLock<Vec<CommentAuthor>>,
+}
+
+/// A section of the deck with the slides it holds, resolved to slide indexes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlideSection {
+    pub name: String,
+    /// Zero-based slide indexes in section order; ids that match no slide are dropped.
+    pub slides: Vec<usize>,
+}
+
+/// An embedded object (`p:oleObj`) on a slide with its package part resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObjectRef {
+    /// `cNvPr/@id` of the graphic frame.
+    pub shape_id: u32,
+    /// `@progId`, e.g. `Excel.Sheet.12`.
+    pub prog_id: Option<String>,
+    pub rel_id: Option<String>,
+    /// The embedding part, when the relationship is internal and resolves.
+    pub part: Option<String>,
+    pub content_type: Option<String>,
+    /// The external target for linked objects.
+    pub external: Option<String>,
 }
 
 /// A thread-safe handle from which a [`Document`] is rebuilt; see [`Document::from_seed`].
@@ -150,11 +177,102 @@ impl Document {
             slides,
             defects,
             package: package.seed(),
+            authors: OnceLock::new(),
         });
         Ok(Self {
             package,
             shared,
             threads: threads_from_env(),
+        })
+    }
+
+    /// The Core Properties part (`docProps/core.xml`), when the package has one.
+    pub fn core_properties(&self) -> Result<Option<CoreProperties>> {
+        let Some(part) = self.metadata_part(RelKind::CoreProperties, "/docProps/core.xml")? else {
+            return Ok(None);
+        };
+        let xml = self.package.read_part(&part)?;
+        CoreProperties::parse(&xml)
+            .map(Some)
+            .map_err(|err| xml_error(&part, err))
+    }
+
+    /// The Extended Properties part (`docProps/app.xml`), when the package has one.
+    pub fn app_properties(&self) -> Result<Option<AppProperties>> {
+        let Some(part) = self.metadata_part(RelKind::ExtendedProperties, "/docProps/app.xml")?
+        else {
+            return Ok(None);
+        };
+        let xml = self.package.read_part(&part)?;
+        AppProperties::parse(&xml)
+            .map(Some)
+            .map_err(|err| xml_error(&part, err))
+    }
+
+    /// A package-level metadata part: by relationship kind, else at its conventional name.
+    fn metadata_part(&self, kind: RelKind, conventional: &str) -> Result<Option<String>> {
+        let rels = self.package.package_rels()?;
+        let by_rel = rels
+            .iter()
+            .filter(|rel| RelKind::of(&rel.rel_type) == kind)
+            .find_map(|rel| rels.resolve(rel))
+            .filter(|part| self.package.has_part(part));
+        if by_rel.is_some() {
+            return Ok(by_rel);
+        }
+        Ok(self
+            .package
+            .has_part(conventional)
+            .then(|| conventional.to_string()))
+    }
+
+    /// The deck's sections (PowerPoint 2010 `p14:sectionLst`) with their
+    /// slides as zero-based indexes; empty when the deck has none.
+    pub fn sections(&self) -> Vec<SlideSection> {
+        self.shared
+            .presentation
+            .sections
+            .iter()
+            .map(|section| SlideSection {
+                name: section.name.clone(),
+                slides: section
+                    .slide_ids
+                    .iter()
+                    .filter_map(|id| {
+                        self.shared
+                            .slides
+                            .iter()
+                            .position(|slide| slide.id == Some(*id))
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Every comment author the presentation part links to, both flavours;
+    /// unreadable authors parts count as empty.
+    pub fn comment_authors(&self) -> &[CommentAuthor] {
+        self.shared.authors.get_or_init(|| {
+            let Ok(rels) = self.package.rels(&self.shared.presentation_part) else {
+                return Vec::new();
+            };
+            let mut authors = Vec::new();
+            for rel in rels.iter() {
+                let kind = RelKind::of(&rel.rel_type);
+                if kind != RelKind::CommentAuthors && kind != RelKind::Authors {
+                    continue;
+                }
+                let Some(part) = rels.resolve(rel) else {
+                    continue;
+                };
+                let Ok(xml) = self.package.read_part(&part) else {
+                    continue;
+                };
+                if let Ok(mut parsed) = parse_authors(&xml) {
+                    authors.append(&mut parsed);
+                }
+            }
+            authors
         })
     }
 
@@ -369,6 +487,30 @@ impl Document {
     }
 }
 
+/// One line for a comment: `[comment] Author: text`, replies indented.
+fn write_comment_line(comment: &Comment, out: &mut String) {
+    if comment.reply {
+        out.push_str("  ");
+    }
+    out.push_str(match comment.reply {
+        true => "[reply] ",
+        false => "[comment] ",
+    });
+    if let Some(author) = &comment.author {
+        out.push_str(author);
+        out.push_str(": ");
+    }
+    out.push_str(comment.text.trim());
+}
+
+fn xml_error(part: &str, err: crate::xml::XmlError) -> Error {
+    Error::Xml {
+        part: part.to_string(),
+        offset: err.offset,
+        msg: err.msg.to_string(),
+    }
+}
+
 fn locate_presentation(package: &Package) -> Result<(String, Located)> {
     let rels = package.package_rels()?;
     let by_rel = rels
@@ -471,18 +613,30 @@ impl<'d> Slide<'d> {
         }
         let mut out = String::new();
         write_content_text(&self.content, options, &mut out);
-        if !options.notes {
-            return out;
-        }
-        match self.notes() {
-            Ok(Some(notes)) if !notes.is_empty() => {
-                if !out.is_empty() {
-                    out.push('\n');
+        if options.notes {
+            match self.notes() {
+                Ok(Some(notes)) if !notes.is_empty() => {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    notes.write_text(&mut out);
                 }
-                notes.write_text(&mut out);
+                Ok(_) => {}
+                Err(err) => report.failed_notes.push((self.index, err.to_string())),
             }
-            Ok(_) => {}
-            Err(err) => report.failed_notes.push((self.index, err.to_string())),
+        }
+        if options.comments {
+            match self.comments() {
+                Ok(comments) => {
+                    for comment in comments {
+                        if !out.is_empty() {
+                            out.push('\n');
+                        }
+                        write_comment_line(&comment, &mut out);
+                    }
+                }
+                Err(err) => report.failed_comments.push((self.index, err.to_string())),
+            }
         }
         out
     }
@@ -500,6 +654,67 @@ impl<'d> Slide<'d> {
     /// The Notes Slide part, if the slide has one.
     pub fn notes_part(&self) -> Result<Option<String>> {
         self.related_part(RelKind::NotesSlide)
+    }
+
+    /// The comments part of either flavour, if the slide has one.
+    pub fn comments_part(&self) -> Result<Option<String>> {
+        match self.related_part(RelKind::ModernComments)? {
+            Some(part) => Ok(Some(part)),
+            None => self.related_part(RelKind::Comments),
+        }
+    }
+
+    /// The slide's comments in document order, replies after their parent.
+    pub fn comments(&self) -> Result<Vec<Comment>> {
+        let Some(part) = self.comments_part()? else {
+            return Ok(Vec::new());
+        };
+        let xml = self.doc.package.read_part(&part)?;
+        parse_comments(&xml, self.doc.comment_authors()).map_err(|err| xml_error(&part, err))
+    }
+
+    /// Every embedded object on the slide with its part resolved.
+    pub fn objects(&self) -> Result<Vec<ObjectRef>> {
+        let rels = self.rels()?;
+        let mut objects = Vec::new();
+        for shape in self.content.walk() {
+            let Content::Ole(ole) = &shape.content else {
+                continue;
+            };
+            let rel = ole.rel_id.as_deref().and_then(|id| rels.get(id));
+            let part = rel
+                .and_then(|rel| rels.resolve(rel))
+                .filter(|part| self.doc.package.has_part(part));
+            let content_type = part
+                .as_deref()
+                .and_then(|part| self.doc.package.content_type_of(part))
+                .map(str::to_string);
+            objects.push(ObjectRef {
+                shape_id: shape.id,
+                prog_id: ole.prog_id.clone(),
+                rel_id: ole.rel_id.clone(),
+                part,
+                content_type,
+                external: rel
+                    .filter(|rel| rel.mode == TargetMode::External)
+                    .map(|rel| rel.target.clone()),
+            });
+        }
+        Ok(objects)
+    }
+
+    /// The bytes of an embedded object's part.
+    pub fn object_bytes(&self, object: &ObjectRef) -> Result<Vec<u8>> {
+        let part = object
+            .part
+            .as_deref()
+            .ok_or_else(|| Error::MissingRelationship {
+                part: self.part.clone(),
+                id: object.rel_id.clone().unwrap_or_default(),
+            })?;
+        let mut out = Vec::new();
+        self.doc.package.read_part_into(part, &mut out)?;
+        Ok(out)
     }
 
     /// The Slide Layout part.

@@ -734,3 +734,69 @@ fn max_findings_truncates() {
     assert_eq!(report.findings.len(), 2);
     assert!(report.truncated);
 }
+
+fn utf16le_with_bom(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    let mut out = vec![0xff, 0xfe];
+    for unit in text.encode_utf16() {
+        out.extend(unit.to_le_bytes());
+    }
+    out
+}
+
+/// The deck rebuilt entry by entry, with `slide1.xml` replaced by `pieces`.
+fn deck_with_slide_pieces(pieces: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut builder = ZipBuilder::new();
+    for (name, bytes) in deck().parts() {
+        if name != "ppt/slides/slide1.xml" {
+            builder = builder.deflated(&name, &bytes);
+            continue;
+        }
+        for (piece, data) in pieces {
+            builder = builder.deflated(piece, data);
+        }
+    }
+    builder.build()
+}
+
+#[test]
+fn opc007_incomplete_piece_sequence() {
+    let slide = deck()
+        .parts()
+        .into_iter()
+        .find(|(name, _)| name == "ppt/slides/slide1.xml")
+        .unwrap()
+        .1;
+    let complete = deck_with_slide_pieces(&[
+        ("ppt/slides/slide1.xml/[0].piece", &slide[..40]),
+        ("ppt/slides/slide1.xml/[1].last.piece", &slide[40..]),
+    ]);
+    assert!(!codes(&run(complete)).contains(&"OPC007"));
+    let gap = deck_with_slide_pieces(&[
+        ("ppt/slides/slide1.xml/[0].piece", &slide[..40]),
+        ("ppt/slides/slide1.xml/[2].last.piece", &slide[40..]),
+    ]);
+    let report = run(gap);
+    assert!(codes(&report).contains(&"OPC007"), "{:?}", codes(&report));
+}
+
+#[test]
+fn xml004_utf16_part_is_noted_and_still_checked() {
+    let mut builder = ZipBuilder::new();
+    for (name, bytes) in deck().parts() {
+        let data = match name == "ppt/slides/slide1.xml" {
+            true => utf16le_with_bom(&bytes),
+            false => bytes,
+        };
+        builder = builder.deflated(&name, &data);
+    }
+    let report = run(builder.build());
+    let finding = report
+        .findings
+        .iter()
+        .find(|finding| finding.code == "XML004")
+        .expect("XML004 reported");
+    assert_eq!(finding.severity, Severity::Info);
+    assert!(!codes(&report).contains(&"XML001"));
+    assert!(report.is_clean(), "{:?}", codes(&report));
+}

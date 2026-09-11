@@ -22,12 +22,13 @@ pptxboss skill install --global
 ## CLI
 
 ```sh
-pptxboss info deck.pptx                 # slide count, size, one line per slide with flags
+pptxboss info deck.pptx                 # slide count, size, properties, sections, one line per slide with flags
 pptxboss info --json deck.pptx
 pptxboss text deck.pptx                 # slide text; slides separated by a blank line
 pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}]
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number placeholders
+pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
 pptxboss text --threads 1 deck.pptx     # cap worker threads (default: every core)
 pptxboss check deck.pptx                # exit 0 clean, 1 errors, 2 unreadable
 pptxboss check --json --quiet deck.pptx
@@ -59,6 +60,8 @@ for slide in doc:                              # lazy, parsed on demand
     slide.text()                               # z-order text, options: furniture=, hidden_shapes=
     slide.paragraphs()                         # every non-empty paragraph incl. table cells
     slide.notes()                              # speaker notes or None
+    slide.comments()                           # Comment(author, initials, date, text, reply)
+    slide.embedded_objects()                   # EmbeddedObject(prog_id, part, ...); slide.object_bytes(obj)
     slide.tables()                             # list of rows of cell texts
     for shape in slide.shapes():               # kind: text|picture|table|group|chart|diagram|ole|...
         shape.text; shape.placeholder; shape.frame; shape.children
@@ -67,7 +70,9 @@ for slide in doc:                              # lazy, parsed on demand
     slide.hyperlink("rId3")                    # URL or internal part for a relationship id
 doc.slides()                                   # all slides, parsed in parallel
 doc.titles()
-doc.text(notes=True)                           # whole deck, blank line between slides
+doc.core_properties(); doc.app_properties()    # docProps metadata or None
+doc.sections()                                 # Section(name, slides) with zero-based indexes
+doc.text(notes=True, comments=True, alt_text=True)  # whole deck, blank line between slides
 text, warnings = doc.text_reporting()          # warnings: what the reader skipped
 doc.slide_texts(hidden_slides=False)
 
@@ -92,6 +97,9 @@ caps it.
 
 - A slide that fails to parse becomes a warning and an empty text, never an
   error for the whole deck; read `text_reporting()` or stderr for it.
+- Comments and alternative text are off by default in every text call so
+  the output stays comparable with the slide content; pass `--comments`,
+  `--alt-text` or the matching keyword arguments.
 - Encrypted decks and legacy binary `.ppt` files are compound files, not
   packages; they are refused with a clear error.
 - `check` exit code 1 means errors were found; warnings alone exit 0.

@@ -1,5 +1,6 @@
 //! XML rules for every XML part (ECMA-376 Part 2, 6.2.5; Part 4, clause 7).
 
+use pptxboss_core::encoding::utf16_xml_to_utf8;
 use pptxboss_core::opc::is_rels_part;
 use pptxboss_core::xml::{well_formed, Event, Reader};
 
@@ -25,9 +26,9 @@ pub const XML003: Rule = Rule {
 };
 pub const XML004: Rule = Rule {
     code: "XML004",
-    severity: Severity::Warning,
+    severity: Severity::Info,
     clause: "Part 2 6.2.5",
-    summary: "XML parts are UTF-8; UTF-16 parts are legal but not read by this implementation",
+    summary: "XML parts are UTF-8 or UTF-16; a UTF-16 part is noted and read after transcoding",
 };
 
 pub static XML_RULES: [Rule; 4] = [XML001, XML002, XML003, XML004];
@@ -77,21 +78,21 @@ pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
         if !xml {
             continue;
         }
-        let data = match package.read_part(&part.name) {
-            Ok(data) => data,
-            Err(err) => {
-                sink.push(
-                    Finding::new(&XML001, format!("part could not be read: {err}"))
-                        .in_part(&part.name),
-                );
-                continue;
-            }
-        };
-        sink.part_read();
-        if data.starts_with(&[0xff, 0xfe]) || data.starts_with(&[0xfe, 0xff]) {
-            sink.push(Finding::new(&XML004, "part is UTF-16 encoded").in_part(&part.name));
+        let mut stored = Vec::new();
+        if let Err(err) = package.read_part_bytes(&part.name, &mut stored) {
+            sink.push(
+                Finding::new(&XML001, format!("part could not be read: {err}")).in_part(&part.name),
+            );
             continue;
         }
+        sink.part_read();
+        let data = match utf16_xml_to_utf8(&stored) {
+            Some(utf8) => {
+                sink.push(Finding::new(&XML004, "part is UTF-16 encoded").in_part(&part.name));
+                utf8
+            }
+            None => stored,
+        };
         if let Some(encoding) = declared_encoding(&data) {
             if !encoding.eq_ignore_ascii_case("utf-8") && !encoding.eq_ignore_ascii_case("utf-16") {
                 sink.push(

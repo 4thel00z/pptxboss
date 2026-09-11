@@ -149,3 +149,51 @@ fn rules_lists_every_code() {
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert!(value.as_array().unwrap().len() > 40);
 }
+
+fn features_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/features.pptx")
+}
+
+#[test]
+fn info_lists_properties_sections_and_comment_flags() {
+    let path = features_fixture();
+    let (code, stdout, stderr) = run(&["info", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stdout.contains("section:      Opening (slides 1-2)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("section:      Closing (slides 3)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("   1  Commented [pictures, comments]"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("   2  Embedded [objects]"), "{stdout}");
+    let (code, json, _) = run(&["info", "--json", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["sections"][0]["name"], "Opening");
+    assert_eq!(value["sections"][0]["slides"], serde_json::json!([1, 2]));
+    assert!(value["properties"].is_object());
+    assert_eq!(value["slide_list"][1]["objects"], 1);
+    assert_eq!(value["slide_list"][0]["has_comments"], true);
+}
+
+#[test]
+fn text_appends_comments_and_alt_text_on_request() {
+    let path = features_fixture();
+    let (code, plain, _) = run(&["text", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(!plain.contains("[comment]"));
+    assert!(!plain.contains("A blue diagram"));
+    let (code, rich, stderr) = run(&["text", "--comments", "--alt-text", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        rich.contains("A point\nA blue diagram\n[comment] Ada Lovelace: Tighten this point"),
+        "{rich}"
+    );
+    assert!(rich.contains("Embedded\nBudget sheet"), "{rich}");
+}

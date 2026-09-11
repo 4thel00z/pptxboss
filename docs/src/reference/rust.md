@@ -2,7 +2,7 @@
 
 | Crate | Start here |
 |---|---|
-| `pptxboss-core` | `Document::open`, `Document::slide`, `Slide::text`, `Document::map_slides`; `Package` for the raw view; `zip::Archive`, `xml::Reader`, `opc`, `model` |
+| `pptxboss-core` | `Document::open`, `Document::slide`, `Slide::text`, `Document::map_slides`, `Document::core_properties`, `Document::sections`, `Slide::comments`, `Slide::objects`; `Package` for the raw view; `zip::Archive`, `inflate`, `xml::Reader`, `opc`, `model` |
 | `pptxboss-check` | `check`, `check_path`, `check_bytes`, `rules`, `Finding`, `Severity`, `CheckOptions` |
 | `pptxboss-write` | `Presentation`, `Slide`, `Paragraph`, `Rect`, `SlideSize`, `Layout`, `from_markdown` |
 | `pptxboss-cli` | the binary |

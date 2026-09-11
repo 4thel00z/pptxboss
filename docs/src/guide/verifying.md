@@ -1,6 +1,6 @@
 # Verifying a deck
 
-`pptxboss check` runs 71 structural rules from ECMA-376 Parts 1 and 2 over
+`pptxboss check` runs 72 structural rules from ECMA-376 Parts 1 and 2 over
 a package: the ZIP container, part names, content types, relationships,
 required parts, id ranges and uniqueness, XML well-formedness, namespace
 consistency and core properties. There is no schema validation; the rules

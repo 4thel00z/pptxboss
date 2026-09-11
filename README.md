@@ -18,10 +18,10 @@ pure-Python XML tree. pptxboss is a clean-room reader built from the ECMA-376
 specification (Office Open XML): safe Rust, no C dependencies, no bindings to
 another engine, one core behind the CLI and the Python extension. It is a
 **lenient reader**: real decks are damaged, so it compensates for junk before
-the archive, accepts data descriptors and Zip64 records, tolerates broken
-content types and relationships, recovers the slide list when the
-presentation part does not list it, and skips what it cannot read instead of
-refusing, reporting every skip.
+the archive, accepts data descriptors and Zip64 records, reads UTF-16 parts and
+interleaved pieces, tolerates broken content types and relationships,
+recovers the slide list when the presentation part does not list it, and
+skips what it cannot read instead of refusing, reporting every skip.
 
 ## Highlights
 
@@ -41,7 +41,12 @@ refusing, reporting every skip.
   same element ids, and `mc:AlternateContent` is resolved per Part 3.
 - **Two views of a package**: `Package` keeps every defect as written for
   the verifier; `Document` reads around them and says what it skipped.
-- **A lean verifier**: `pptxboss check` runs 71 structural rules from
+- **The whole deck, not just the slides**: speaker notes, comments of both
+  flavours (the 2006 comments part and the threaded 2018 one) with their
+  authors, sections, core and application properties, embedded objects with
+  their bytes, pictures with their image parts, hyperlinks, and alternative
+  text on request.
+- **A lean verifier**: `pptxboss check` runs 72 structural rules from
   ECMA-376 Parts 1 and 2 over the container, part names, content types,
   relationships, required parts, id ranges and XML well-formedness. Every
   finding carries a stable code, a severity and the clause it enforces.
@@ -68,6 +73,7 @@ cargo install pptxboss-cli    # the pptxboss binary
 pptxboss info deck.pptx             # slide count, size, one line per slide
 pptxboss text deck.pptx             # slide text, slides separated by blank lines
 pptxboss text --notes --headings deck.pptx
+pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
 pptxboss text --json deck.pptx      # [{"number": 1, "text": "..."}, ...]
 pptxboss text --threads 1 deck.pptx # cap the worker threads (default: every core)
 pptxboss check deck.pptx            # verify against ECMA-376; exit 1 on errors
@@ -97,6 +103,13 @@ for slide in doc:                      # slides parse lazily
         print(table)
     for image in slide.images():       # pictures with their image parts
         data = slide.image_bytes(image)
+    for comment in slide.comments():   # author, date, text; replies flagged
+        print(comment.author, comment.text)
+    for obj in slide.embedded_objects():  # p:oleObj with prog_id and part
+        data = slide.object_bytes(obj)
+props = doc.core_properties()          # title, creator, created, modified, ...
+for section in doc.sections():         # name and zero-based slide indexes
+    print(section.name, section.slides)
 text, warnings = doc.text_reporting()  # whole deck, plus what was skipped
 
 for finding in pptxboss.check("deck.pptx"):   # the verifier, most severe first
@@ -205,7 +218,7 @@ reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
 | Crate | What it does |
 |---|---|
 | `pptxboss-core` | ZIP container with positioned reads, CRC-32, XML pull tokenizer, OPC package model, PresentationML document model, text extraction |
-| `pptxboss-check` | The verifier: 71 clause-numbered rules over package and presentation structure |
+| `pptxboss-check` | The verifier: 72 clause-numbered rules over package and presentation structure |
 | `pptxboss-write` | Creates decks: titles, bullets, paragraphs, text boxes, tables, pictures, notes; Markdown to slides; deterministic output that verifies clean |
 | `pptxboss-cli` | The `pptxboss` binary |
 | `pptxboss-py` | The `pptxboss._pptxboss` extension module behind the Python package |
@@ -215,8 +228,9 @@ reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
 
 - Encrypted packages (OLE compound files with `EncryptionInfo`) and legacy
   binary `.ppt` files are detected and refused with a clear error, not read.
-- UTF-16 encoded XML parts are not read.
-- Interleaved ("piece") ZIP items are not reassembled.
+- Interleaved ("piece") items are reassembled, but no public test deck uses
+  them; the only evidence is the testkit fixture built from the OPC text.
+- Chart and diagram text is not extracted yet.
 - No rendering of slides to images.
 
 ## Development

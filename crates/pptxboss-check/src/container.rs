@@ -107,10 +107,16 @@ pub const OPC006: Rule = Rule {
     clause: "Part 2 7.2.3.2.1",
     summary: "The content types stream is well-formed XML",
 };
+pub const OPC007: Rule = Rule {
+    code: "OPC007",
+    severity: Severity::Error,
+    clause: "Part 2 7.2.5.2",
+    summary: "Interleaved items form a complete piece sequence from [0].piece to [n].last.piece",
+};
 
-pub static CONTAINER_RULES: [Rule; 17] = [
+pub static CONTAINER_RULES: [Rule; 18] = [
     ZIP001, ZIP002, ZIP003, ZIP004, ZIP005, ZIP006, ZIP007, ZIP008, ZIP009, ZIP010, ZIP011, OPC001,
-    OPC002, OPC003, OPC004, OPC005, OPC006,
+    OPC002, OPC003, OPC004, OPC005, OPC006, OPC007,
 ];
 
 pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
@@ -242,6 +248,15 @@ pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
     for (derived, base) in &defects.derivable {
         sink.push(Finding::new(&OPC003, format!("derivable from {base}")).in_part(derived));
     }
+    for logical in &defects.incomplete_pieces {
+        sink.push(
+            Finding::new(
+                &OPC007,
+                "piece sequence has gaps or no single .last piece; not a part",
+            )
+            .in_part(logical),
+        );
+    }
     if defects.content_types_missing {
         sink.push(Finding::new(&OPC004, "[Content_Types].xml is missing"));
     }
@@ -264,10 +279,8 @@ pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
         );
     }
     if ctx.options.verify_crc {
+        let mut data = Vec::new();
         for part in package.parts() {
-            let Some(entry) = archive.get(part.entry) else {
-                continue;
-            };
             let is_xml = package
                 .content_type_of(&part.name)
                 .is_some_and(|ct| ct.ends_with("+xml") || ct.ends_with("/xml"))
@@ -275,23 +288,34 @@ pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
             if !is_xml {
                 continue;
             }
-            match package.read_part(&part.name) {
-                Ok(data) => {
-                    sink.part_read();
-                    if !pptxboss_core::zip::Archive::crc_matches(entry, &data) {
-                        sink.push(
-                            Finding::new(
-                                &ZIP008,
-                                "decompressed data does not match the recorded CRC-32",
-                            )
+            sink.part_read();
+            let entries: Vec<usize> = match part.pieces.is_empty() {
+                true => vec![part.entry],
+                false => part.pieces.clone(),
+            };
+            for index in entries {
+                let Some(entry) = archive.get(index) else {
+                    continue;
+                };
+                if let Err(err) = archive.read(entry, &mut data) {
+                    sink.push(
+                        Finding::new(&ZIP008, format!("part could not be read: {err}"))
                             .in_part(&part.name),
-                        );
-                    }
+                    );
+                    continue;
                 }
-                Err(err) => sink.push(
-                    Finding::new(&ZIP008, format!("part could not be read: {err}"))
+                if !pptxboss_core::zip::Archive::crc_matches(entry, &data) {
+                    sink.push(
+                        Finding::new(
+                            &ZIP008,
+                            format!(
+                                "decompressed data of {} does not match the recorded CRC-32",
+                                entry.name
+                            ),
+                        )
                         .in_part(&part.name),
-                ),
+                    );
+                }
             }
         }
     }

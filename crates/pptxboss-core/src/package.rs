@@ -12,6 +12,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::encoding::utf16_xml_to_utf8;
 use crate::error::{Error, Result};
 use crate::hash::FastMap;
 use crate::opc::{
@@ -26,8 +27,10 @@ use crate::zip::{Archive, Entry, Source};
 pub struct Part {
     /// The part name: `/` followed by the item name (7.3.5).
     pub name: String,
-    /// Index of the backing entry in the archive.
+    /// Index of the backing entry in the archive; the first piece of an interleaved part.
     pub entry: usize,
+    /// Every piece of an interleaved part (7.2.4) in piece order; empty otherwise.
+    pub pieces: Vec<usize>,
 }
 
 /// What the package layer found wrong with the container's item names.
@@ -49,15 +52,18 @@ pub struct PackageDefects {
     pub derivable: Vec<(String, String)>,
     /// Entries that are directories; a package has no directories.
     pub directories: Vec<String>,
+    /// Logical items whose `[n].piece` sequence is incomplete (7.2.5.2); not mapped to parts.
+    pub incomplete_pieces: Vec<String>,
 }
 
 struct Shared {
     archive: Archive,
     parts: Vec<Part>,
     index: FastMap<String, usize>,
-    /// The archive entry of `[Content_Types].xml`, parsed on first use:
-    /// reading a deck through its relationships never needs it.
-    content_types_entry: Option<usize>,
+    /// The archive entries of `[Content_Types].xml` (several when
+    /// interleaved), parsed on first use: reading a deck through its
+    /// relationships never needs it.
+    content_types_entries: Vec<usize>,
     content_types: std::sync::OnceLock<ParsedContentTypes>,
     /// Defects found while indexing; the name-grammar and derivability
     /// checks are added on first request, since only the verifier reads them.
@@ -74,11 +80,11 @@ struct ParsedContentTypes {
 }
 
 impl ParsedContentTypes {
-    fn read(archive: &Archive, entry: Option<usize>) -> Self {
-        let Some(entry) = entry else {
+    fn read(archive: &Archive, entries: &[usize]) -> Self {
+        if entries.is_empty() {
             return Self::default();
-        };
-        match archive.read_to_vec(&archive.entries()[entry]) {
+        }
+        match read_entries(archive, entries) {
             Err(err) => Self {
                 unreadable: Some(err.to_string()),
                 ..Self::default()
@@ -139,17 +145,29 @@ impl Package {
         let mut index: FastMap<String, usize> =
             FastMap::with_capacity_and_hasher(archive.entries().len(), Default::default());
         let mut defects = PackageDefects::default();
-        let mut content_types_entry = None;
+        let mut content_types_entries = Vec::new();
+        let mut pieces: FastMap<String, (String, Vec<(u64, bool, usize)>)> = FastMap::default();
         for (i, entry) in archive.entries().iter().enumerate() {
             if entry.is_directory() {
                 defects.directories.push(entry.name.clone());
+                continue;
+            }
+            if let Some((prefix_len, number, last)) = piece_suffix(&entry.name) {
+                let logical = format!("/{}", &entry.name[..prefix_len]);
+                pieces
+                    .entry(equivalence_key(&logical))
+                    .or_insert_with(|| (logical, Vec::new()))
+                    .1
+                    .push((number, last, i));
                 continue;
             }
             if entry.name.eq_ignore_ascii_case(CONTENT_TYPES_ITEM) {
                 if entry.name != CONTENT_TYPES_ITEM {
                     defects.content_types_case = Some(entry.name.clone());
                 }
-                content_types_entry.get_or_insert(i);
+                if content_types_entries.is_empty() {
+                    content_types_entries.push(i);
+                }
                 continue;
             }
             let name = format!("/{}", entry.name);
@@ -162,15 +180,54 @@ impl Package {
                 continue;
             }
             index.insert(key, parts.len());
-            parts.push(Part { name, entry: i });
+            parts.push(Part {
+                name,
+                entry: i,
+                pieces: Vec::new(),
+            });
+        }
+        let mut sequences: Vec<(String, (String, Vec<(u64, bool, usize)>))> =
+            pieces.into_iter().collect();
+        sequences.sort_by(|a, b| a.0.cmp(&b.0));
+        for (key, (logical, mut items)) in sequences {
+            items.sort_by_key(|(number, _, _)| *number);
+            let complete = items
+                .iter()
+                .enumerate()
+                .all(|(position, (number, last, _))| {
+                    *number == position as u64 && *last == (position + 1 == items.len())
+                });
+            if !complete {
+                defects.incomplete_pieces.push(logical);
+                continue;
+            }
+            let entries: Vec<usize> = items.iter().map(|(_, _, entry)| *entry).collect();
+            if logical[1..].eq_ignore_ascii_case(CONTENT_TYPES_ITEM) {
+                if content_types_entries.is_empty() {
+                    content_types_entries = entries;
+                }
+                continue;
+            }
+            if let Some(&existing) = index.get(&key) {
+                defects
+                    .collisions
+                    .push((parts[existing].name.clone(), logical));
+                continue;
+            }
+            index.insert(key, parts.len());
+            parts.push(Part {
+                name: logical,
+                entry: entries[0],
+                pieces: entries,
+            });
         }
 
-        defects.content_types_missing = content_types_entry.is_none();
+        defects.content_types_missing = content_types_entries.is_empty();
         let shared = Arc::new(Shared {
             archive,
             parts,
             index,
-            content_types_entry,
+            content_types_entries,
             content_types: std::sync::OnceLock::new(),
             base_defects: defects,
             defects: std::sync::OnceLock::new(),
@@ -207,7 +264,7 @@ impl Package {
 
     fn parsed_content_types(&self) -> &ParsedContentTypes {
         self.shared.content_types.get_or_init(|| {
-            ParsedContentTypes::read(&self.shared.archive, self.shared.content_types_entry)
+            ParsedContentTypes::read(&self.shared.archive, &self.shared.content_types_entries)
         })
     }
 
@@ -265,18 +322,50 @@ impl Package {
             return Ok(Rc::clone(data));
         }
         let part = &self.shared.parts[index];
-        let entry = &self.shared.archive.entries()[part.entry];
-        let data = Rc::new(self.shared.archive.read_to_vec(entry)?);
+        let mut bytes = Vec::new();
+        self.read_part_entries(part, &mut bytes)?;
+        let data = Rc::new(bytes);
         self.data.borrow_mut().insert(index, Rc::clone(&data));
         Ok(data)
     }
 
     /// The decompressed bytes of a part into `out`, bypassing the cache.
+    /// Interleaved pieces are concatenated; a UTF-16 XML part comes back as UTF-8.
     pub fn read_part_into(&self, name: &str, out: &mut Vec<u8>) -> Result<()> {
-        let entry = self
-            .entry(name)
+        let index = self
+            .part_index(name)
             .ok_or_else(|| Error::MissingPart(name.to_string()))?;
-        self.shared.archive.read(entry, out)
+        self.read_part_entries(&self.shared.parts[index], out)
+    }
+
+    /// The decompressed bytes of a part exactly as stored (pieces
+    /// concatenated), without the UTF-16 transcoding of [`Package::read_part`].
+    pub fn read_part_bytes(&self, name: &str, out: &mut Vec<u8>) -> Result<()> {
+        let index = self
+            .part_index(name)
+            .ok_or_else(|| Error::MissingPart(name.to_string()))?;
+        self.read_stored(&self.shared.parts[index], out)
+    }
+
+    fn read_stored(&self, part: &Part, out: &mut Vec<u8>) -> Result<()> {
+        match part.pieces.is_empty() {
+            true => {
+                let entry = &self.shared.archive.entries()[part.entry];
+                self.shared.archive.read(entry, out)
+            }
+            false => {
+                *out = read_entries(&self.shared.archive, &part.pieces)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn read_part_entries(&self, part: &Part, out: &mut Vec<u8>) -> Result<()> {
+        self.read_stored(part, out)?;
+        if let Some(utf8) = utf16_xml_to_utf8(out) {
+            *out = utf8;
+        }
+        Ok(())
     }
 
     /// The relationships of `source` (`/` for the package). A missing
@@ -311,6 +400,39 @@ impl Package {
     pub fn resolve(&self, source: &str, id: &str) -> Result<Option<String>> {
         Ok(self.rels(source)?.target_of(id))
     }
+}
+
+/// The concatenated decompressed bytes of `entries`, in order.
+fn read_entries(archive: &Archive, entries: &[usize]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut piece = Vec::new();
+    for &entry in entries {
+        archive.read(&archive.entries()[entry], &mut piece)?;
+        out.extend_from_slice(&piece);
+    }
+    Ok(out)
+}
+
+/// `(prefix length, piece number, is last)` when `name` ends with a piece
+/// suffix `/[n].piece` or `/[n].last.piece` (7.2.5.2), compared ASCII
+/// case-insensitively; piece numbers carry no leading zeros.
+fn piece_suffix(name: &str) -> Option<(usize, u64, bool)> {
+    let lower = name.to_ascii_lowercase();
+    let body = lower.strip_suffix(".piece")?;
+    let (body, last) = match body.strip_suffix(".last") {
+        Some(body) => (body, true),
+        None => (body, false),
+    };
+    let body = body.strip_suffix(']')?;
+    let open = body.rfind("/[")?;
+    let digits = &body[open + 2..];
+    let valid = !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && (digits == "0" || !digits.starts_with('0'));
+    if !valid || open == 0 {
+        return None;
+    }
+    Some((open, digits.parse().ok()?, last))
 }
 
 fn find_derivable(parts: &[Part], defects: &mut PackageDefects) {

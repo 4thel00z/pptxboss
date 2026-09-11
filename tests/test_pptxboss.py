@@ -152,3 +152,32 @@ def test_threads_cap_gives_the_same_text(three_slides_pptx: Path) -> None:
     assert one.text() == every_core.text()
     assert one.slide_texts() == every_core.slide_texts()
     assert [s.title for s in one.slides()] == [s.title for s in every_core.slides()]
+
+
+def test_properties_sections_comments_and_objects(features_pptx: Path) -> None:
+    doc = pptxboss.Document(features_pptx)
+    core = doc.core_properties()
+    assert core is not None and isinstance(core, pptxboss.CoreProperties)
+    app = doc.app_properties()
+    assert app is not None and isinstance(app, pptxboss.AppProperties)
+    sections = doc.sections()
+    assert [(s.name, s.slides) for s in sections] == [("Opening", [0, 1]), ("Closing", [2])]
+    first = doc[0]
+    comments = first.comments()
+    assert len(comments) == 1
+    assert comments[0].author == "Ada Lovelace"
+    assert comments[0].initials == "AL"
+    assert comments[0].text == "Tighten this point"
+    assert comments[0].reply is False
+    assert first.text() == "Commented\nA point"
+    assert first.text(alt_text=True) == "Commented\nA point\nA blue diagram"
+    objects = doc[1].embedded_objects()
+    assert len(objects) == 1
+    assert objects[0].prog_id == "Excel.Sheet.12"
+    assert objects[0].part == "/ppt/embeddings/oleObject1.xlsx"
+    assert doc[1].object_bytes(objects[0]) == b"PK-workbook-bytes"
+    assert doc[2].comments() == [] and doc[2].embedded_objects() == []
+    text = doc.text(comments=True, alt_text=True)
+    assert "[comment] Ada Lovelace: Tighten this point" in text
+    assert "Budget sheet" in text
+    assert "[comment]" not in doc.text()

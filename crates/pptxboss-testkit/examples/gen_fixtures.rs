@@ -42,6 +42,29 @@ fn main() {
                 )
                 .media("image1.png", PNG, "image/png"),
         ),
+        (
+            "features.pptx",
+            Deck::new()
+                .slide(
+                    DeckSlide::titled("Commented")
+                        .bullet("A point")
+                        .shapes_xml(r#"<p:pic><p:nvPicPr><p:cNvPr id="4" name="Picture 3" descr="A blue diagram"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId3"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="1000000" y="2000000"/><a:ext cx="914400" cy="914400"/></a:xfrm></p:spPr></p:pic>"#)
+                        .rel("rId3", "image", "../media/image1.png", false)
+                        .rel("rId7", "comments", "../comments/comment1.xml", false),
+                )
+                .slide(
+                    DeckSlide::titled("Embedded")
+                        .shapes_xml(r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Object 4" descr="Budget sheet"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/2006/ole"><p:oleObj name="Worksheet" r:id="rId9" imgW="100" imgH="100" progId="Excel.Sheet.12"><p:embed/></p:oleObj></a:graphicData></a:graphic></p:graphicFrame>"#)
+                        .rel("rId9", "package", "../embeddings/oleObject1.xlsx", false),
+                )
+                .slide(DeckSlide::titled("Closing").bullet("Bye"))
+                .media("image1.png", PNG, "image/png")
+                .presentation_rel("rId40", "commentAuthors", "commentAuthors.xml")
+                .presentation_xml(r#"<p:extLst><p:ext uri="{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"><p14:sectionLst xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"><p14:section name="Opening" id="{1A2B3C4D-0000-4000-8000-000000000001}"><p14:sldIdLst><p14:sldId id="256"/><p14:sldId id="257"/></p14:sldIdLst></p14:section><p14:section name="Closing" id="{1A2B3C4D-0000-4000-8000-000000000002}"><p14:sldIdLst><p14:sldId id="258"/></p14:sldIdLst></p14:section></p14:sectionLst></p:ext></p:extLst>"#)
+                .with_part("ppt/commentAuthors.xml", br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cmAuthor id="0" name="Ada Lovelace" initials="AL" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>"#)
+                .with_part("ppt/comments/comment1.xml", br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="0" dt="2024-05-01T10:00:00.000" idx="1"><p:pos x="10" y="10"/><p:text>Tighten this point</p:text></p:cm></p:cmLst>"#)
+                .with_part("ppt/embeddings/oleObject1.xlsx", b"PK-workbook-bytes"),
+        ),
     ];
     for (name, deck) in fixtures {
         let path = dir.join(name);

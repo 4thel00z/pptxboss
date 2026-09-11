@@ -9,8 +9,10 @@
 //! packages where the structure still allows it and reporting what it
 //! skipped.
 
+pub mod comments;
 pub mod crc32;
 pub mod document;
+pub mod encoding;
 pub mod error;
 pub mod hash;
 pub mod inflate;
@@ -20,15 +22,18 @@ pub mod opc;
 pub mod package;
 pub mod pml;
 pub mod presentation;
+pub mod properties;
 pub mod slide;
 pub mod text;
 pub mod xml;
 pub mod zip;
 
-pub use document::{Document, DocumentSeed, ImageRef, Slide, SlideRef};
+pub use comments::{Comment, CommentAuthor};
+pub use document::{Document, DocumentSeed, ImageRef, ObjectRef, Slide, SlideRef, SlideSection};
 pub use error::{Error, Result};
 pub use model::{Content, Paragraph, Run, Shape, SlideContent, TextBody};
 pub use package::{Package, PackageDefects, PackageSeed, Part};
-pub use presentation::Presentation;
+pub use presentation::{Presentation, Section};
+pub use properties::{AppProperties, CoreProperties};
 pub use slide::SlideReport;
 pub use text::{ExtractReport, TextOptions};

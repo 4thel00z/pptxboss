@@ -35,10 +35,22 @@ pub struct SlideSize {
     pub kind: Option<String>,
 }
 
+/// A section of the slide list (`p14:section`, PowerPoint 2010 and later).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Section {
+    pub name: String,
+    /// `@id`, a GUID.
+    pub id: Option<String>,
+    /// `p14:sldId/@id` values: slide ids from `sldIdLst`, in section order.
+    pub slide_ids: Vec<u32>,
+}
+
 /// The parsed presentation part.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presentation {
     pub slides: Vec<SlideId>,
+    /// Sections from the `p14:sectionLst` extension, in order; empty when none.
+    pub sections: Vec<Section>,
     pub masters: Vec<MasterId>,
     /// `r:id` of the notes master, if listed.
     pub notes_master: Option<String>,
@@ -179,11 +191,54 @@ impl Presentation {
                     }
                     Ok(())
                 }
+                b"extLst" => children(reader, &mut |reader, _| {
+                    children(reader, &mut |reader, inner| {
+                        if !inner.name.is(Ns::P14, b"sectionLst") {
+                            return Ok(());
+                        }
+                        parse_sections(reader, &mut presentation.sections)
+                    })
+                }),
                 _ => Ok(()),
             }
         })?;
         Ok(presentation)
     }
+}
+
+/// Reads `p14:section` children of a `p14:sectionLst` into `sections`.
+fn parse_sections<'a>(
+    reader: &mut Reader<'a>,
+    sections: &mut Vec<Section>,
+) -> Result<(), XmlError> {
+    children(reader, &mut |reader, section| {
+        if !section.name.is(Ns::P14, b"section") {
+            return Ok(());
+        }
+        let mut item = Section {
+            name: reader
+                .attr(&section, Ns::None, b"name")
+                .map(unescape_attr)
+                .unwrap_or_default(),
+            id: reader.attr(&section, Ns::None, b"id").map(unescape_attr),
+            slide_ids: Vec::new(),
+        };
+        children(reader, &mut |reader, list| {
+            if !list.name.is(Ns::P14, b"sldIdLst") {
+                return Ok(());
+            }
+            children(reader, &mut |reader, slide| {
+                if slide.name.is(Ns::P14, b"sldId") {
+                    if let Some(id) = attr_u32(reader, &slide, b"id") {
+                        item.slide_ids.push(id);
+                    }
+                }
+                Ok(())
+            })
+        })?;
+        sections.push(item);
+        Ok(())
+    })
 }
 
 fn attr_u32(reader: &Reader<'_>, start: &Start<'_>, local: &[u8]) -> Option<u32> {

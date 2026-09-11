@@ -30,12 +30,21 @@ pub(crate) fn pptx_err(err: impl std::fmt::Display) -> PyErr {
     PptxError::new_err(err.to_string())
 }
 
-fn options(notes: bool, furniture: bool, hidden_shapes: bool, hidden_slides: bool) -> TextOptions {
+fn options(
+    notes: bool,
+    furniture: bool,
+    hidden_shapes: bool,
+    hidden_slides: bool,
+    alt_text: bool,
+    comments: bool,
+) -> TextOptions {
     TextOptions {
         notes,
         furniture,
         hidden_shapes,
         hidden_slides,
+        alt_text,
+        comments,
         ..TextOptions::default()
     }
 }
@@ -206,7 +215,7 @@ impl Document {
     }
 
     /// The text of the whole deck: slides separated by a blank line.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
     fn text(
         &self,
         py: Python<'_>,
@@ -214,14 +223,23 @@ impl Document {
         furniture: bool,
         hidden_shapes: bool,
         hidden_slides: bool,
+        alt_text: bool,
+        comments: bool,
     ) -> String {
-        let options = options(notes, furniture, hidden_shapes, hidden_slides);
+        let options = options(
+            notes,
+            furniture,
+            hidden_shapes,
+            hidden_slides,
+            alt_text,
+            comments,
+        );
         let seed = self.seed.clone();
         py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options).0)
     }
 
     /// The text plus one warning line per problem the reader skipped.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
     fn text_reporting(
         &self,
         py: Python<'_>,
@@ -229,8 +247,17 @@ impl Document {
         furniture: bool,
         hidden_shapes: bool,
         hidden_slides: bool,
+        alt_text: bool,
+        comments: bool,
     ) -> (String, Vec<String>) {
-        let options = options(notes, furniture, hidden_shapes, hidden_slides);
+        let options = options(
+            notes,
+            furniture,
+            hidden_shapes,
+            hidden_slides,
+            alt_text,
+            comments,
+        );
         let seed = self.seed.clone();
         let (text, report) =
             py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options));
@@ -238,7 +265,7 @@ impl Document {
     }
 
     /// One string per slide, in order, extracted in parallel.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
     fn slide_texts(
         &self,
         py: Python<'_>,
@@ -246,10 +273,79 @@ impl Document {
         furniture: bool,
         hidden_shapes: bool,
         hidden_slides: bool,
+        alt_text: bool,
+        comments: bool,
     ) -> Vec<String> {
-        let options = options(notes, furniture, hidden_shapes, hidden_slides);
+        let options = options(
+            notes,
+            furniture,
+            hidden_shapes,
+            hidden_slides,
+            alt_text,
+            comments,
+        );
         let seed = self.seed.clone();
         py.allow_threads(|| CoreDocument::from_seed(seed).slide_texts(&options).0)
+    }
+
+    /// The Core Properties part (`docProps/core.xml`), or None when absent.
+    fn core_properties(&self, py: Python<'_>) -> PyResult<Option<CoreProperties>> {
+        let seed = self.seed.clone();
+        let props = py
+            .allow_threads(|| CoreDocument::from_seed(seed).core_properties())
+            .map_err(pptx_err)?;
+        Ok(props.map(|props| CoreProperties {
+            title: props.title,
+            subject: props.subject,
+            creator: props.creator,
+            keywords: props.keywords,
+            description: props.description,
+            last_modified_by: props.last_modified_by,
+            revision: props.revision,
+            created: props.created,
+            modified: props.modified,
+            last_printed: props.last_printed,
+            category: props.category,
+            content_status: props.content_status,
+            language: props.language,
+            identifier: props.identifier,
+            version: props.version,
+        }))
+    }
+
+    /// The Extended Properties part (`docProps/app.xml`), or None when absent.
+    fn app_properties(&self, py: Python<'_>) -> PyResult<Option<AppProperties>> {
+        let seed = self.seed.clone();
+        let props = py
+            .allow_threads(|| CoreDocument::from_seed(seed).app_properties())
+            .map_err(pptx_err)?;
+        Ok(props.map(|props| AppProperties {
+            application: props.application,
+            app_version: props.app_version,
+            company: props.company,
+            manager: props.manager,
+            template: props.template,
+            presentation_format: props.presentation_format,
+            slides: props.slides,
+            notes: props.notes,
+            hidden_slides: props.hidden_slides,
+            words: props.words,
+            paragraphs: props.paragraphs,
+            total_time: props.total_time,
+            titles_of_parts: props.titles_of_parts,
+        }))
+    }
+
+    /// The deck's sections with zero-based slide indexes; empty when it has none.
+    fn sections(&self) -> Vec<Section> {
+        CoreDocument::from_seed(self.seed.clone())
+            .sections()
+            .into_iter()
+            .map(|section| Section {
+                name: section.name,
+                slides: section.slides,
+            })
+            .collect()
     }
 
     /// The title of every slide (None where a slide has no title placeholder).
@@ -389,15 +485,78 @@ impl Slide {
     }
 
     /// The slide's text: shapes in z-order, paragraphs one per line.
-    #[pyo3(signature = (*, furniture=false, hidden_shapes=false))]
-    fn text(&self, furniture: bool, hidden_shapes: bool) -> String {
+    #[pyo3(signature = (*, furniture=false, hidden_shapes=false, alt_text=false))]
+    fn text(&self, furniture: bool, hidden_shapes: bool, alt_text: bool) -> String {
         let mut out = String::new();
         write_content_text(
             &self.content,
-            &options(false, furniture, hidden_shapes, true),
+            &options(false, furniture, hidden_shapes, true, alt_text, false),
             &mut out,
         );
         out
+    }
+
+    /// The slide's comments in order, replies after their parent.
+    fn comments(&self, py: Python<'_>) -> PyResult<Vec<Comment>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        let comments = py
+            .allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.comments())
+            .map_err(pptx_err)?;
+        Ok(comments
+            .into_iter()
+            .map(|comment| Comment {
+                author: comment.author,
+                initials: comment.initials,
+                date: comment.date,
+                text: comment.text,
+                reply: comment.reply,
+            })
+            .collect())
+    }
+
+    /// Embedded objects on the slide with their package parts.
+    fn embedded_objects(&self, py: Python<'_>) -> PyResult<Vec<EmbeddedObject>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        let objects = py
+            .allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.objects())
+            .map_err(pptx_err)?;
+        Ok(objects
+            .into_iter()
+            .map(|object| EmbeddedObject {
+                shape_id: object.shape_id,
+                prog_id: object.prog_id,
+                rel_id: object.rel_id,
+                part: object.part,
+                content_type: object.content_type,
+                external: object.external,
+            })
+            .collect())
+    }
+
+    /// The bytes of an embedded object's part.
+    fn object_bytes<'py>(
+        &self,
+        py: Python<'py>,
+        object: &EmbeddedObject,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let seed = self.seed.clone();
+        let part = object.part.clone().ok_or_else(|| {
+            pptx_err(format!(
+                "object {} is not stored in the package",
+                object.rel_id.clone().unwrap_or_default()
+            ))
+        })?;
+        let bytes = py
+            .allow_threads(|| {
+                let doc = CoreDocument::from_seed(seed);
+                let mut out = Vec::new();
+                doc.package().read_part_into(&part, &mut out)?;
+                Ok::<_, pptxboss_core::Error>(out)
+            })
+            .map_err(pptx_err)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Every non-empty paragraph on the slide, in order, including table cells.
@@ -640,6 +799,166 @@ impl Shape {
     }
 }
 
+/// The Core Properties part: Dublin Core and OPC metadata, as strings.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct CoreProperties {
+    #[pyo3(get)]
+    title: Option<String>,
+    #[pyo3(get)]
+    subject: Option<String>,
+    #[pyo3(get)]
+    creator: Option<String>,
+    #[pyo3(get)]
+    keywords: Option<String>,
+    #[pyo3(get)]
+    description: Option<String>,
+    #[pyo3(get)]
+    last_modified_by: Option<String>,
+    #[pyo3(get)]
+    revision: Option<String>,
+    #[pyo3(get)]
+    created: Option<String>,
+    #[pyo3(get)]
+    modified: Option<String>,
+    #[pyo3(get)]
+    last_printed: Option<String>,
+    #[pyo3(get)]
+    category: Option<String>,
+    #[pyo3(get)]
+    content_status: Option<String>,
+    #[pyo3(get)]
+    language: Option<String>,
+    #[pyo3(get)]
+    identifier: Option<String>,
+    #[pyo3(get)]
+    version: Option<String>,
+}
+
+#[pymethods]
+impl CoreProperties {
+    fn __repr__(&self) -> String {
+        format!(
+            "CoreProperties(title={:?}, creator={:?}, modified={:?})",
+            self.title, self.creator, self.modified
+        )
+    }
+}
+
+/// The Extended Properties part: what the writing application recorded.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct AppProperties {
+    #[pyo3(get)]
+    application: Option<String>,
+    #[pyo3(get)]
+    app_version: Option<String>,
+    #[pyo3(get)]
+    company: Option<String>,
+    #[pyo3(get)]
+    manager: Option<String>,
+    #[pyo3(get)]
+    template: Option<String>,
+    #[pyo3(get)]
+    presentation_format: Option<String>,
+    #[pyo3(get)]
+    slides: Option<u64>,
+    #[pyo3(get)]
+    notes: Option<u64>,
+    #[pyo3(get)]
+    hidden_slides: Option<u64>,
+    #[pyo3(get)]
+    words: Option<u64>,
+    #[pyo3(get)]
+    paragraphs: Option<u64>,
+    #[pyo3(get)]
+    total_time: Option<u64>,
+    #[pyo3(get)]
+    titles_of_parts: Vec<String>,
+}
+
+#[pymethods]
+impl AppProperties {
+    fn __repr__(&self) -> String {
+        format!(
+            "AppProperties(application={:?}, slides={:?})",
+            self.application, self.slides
+        )
+    }
+}
+
+/// A section of the slide list.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Section {
+    #[pyo3(get)]
+    name: String,
+    /// Zero-based slide indexes in section order.
+    #[pyo3(get)]
+    slides: Vec<usize>,
+}
+
+#[pymethods]
+impl Section {
+    fn __repr__(&self) -> String {
+        format!("Section(name={:?}, slides={:?})", self.name, self.slides)
+    }
+}
+
+/// A comment on a slide; replies follow their parent with `reply` set.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Comment {
+    #[pyo3(get)]
+    author: Option<String>,
+    #[pyo3(get)]
+    initials: Option<String>,
+    #[pyo3(get)]
+    date: Option<String>,
+    #[pyo3(get)]
+    text: String,
+    #[pyo3(get)]
+    reply: bool,
+}
+
+#[pymethods]
+impl Comment {
+    fn __repr__(&self) -> String {
+        format!(
+            "Comment(author={:?}, text={:?}, reply={})",
+            self.author, self.text, self.reply
+        )
+    }
+}
+
+/// An embedded object (`p:oleObj`) on a slide.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct EmbeddedObject {
+    #[pyo3(get)]
+    shape_id: u32,
+    #[pyo3(get)]
+    prog_id: Option<String>,
+    #[pyo3(get)]
+    rel_id: Option<String>,
+    #[pyo3(get)]
+    part: Option<String>,
+    #[pyo3(get)]
+    content_type: Option<String>,
+    #[pyo3(get)]
+    external: Option<String>,
+}
+
+#[pymethods]
+impl EmbeddedObject {
+    fn __repr__(&self) -> String {
+        format!(
+            "EmbeddedObject(shape_id={}, prog_id={:?}, part={:?})",
+            self.shape_id, self.prog_id, self.part
+        )
+    }
+}
+
 /// An image referenced from a slide.
 #[pyclass(frozen, module = "pptxboss")]
 #[derive(Clone)]
@@ -789,6 +1108,11 @@ fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SlideIter>()?;
     m.add_class::<Shape>()?;
     m.add_class::<Image>()?;
+    m.add_class::<CoreProperties>()?;
+    m.add_class::<AppProperties>()?;
+    m.add_class::<Section>()?;
+    m.add_class::<Comment>()?;
+    m.add_class::<EmbeddedObject>()?;
     m.add_class::<Finding>()?;
     m.add_class::<Rule>()?;
     m.add_function(wrap_pyfunction!(check, m)?)?;

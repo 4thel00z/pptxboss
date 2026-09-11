@@ -10,14 +10,39 @@ core (or `PPTXBOSS_THREADS`), 1 stays on the calling thread. Read back as
 
 `slide_count`, `path`, `presentation_part`, `slide_size`, `slide_size_type`;
 `len()`, indexing with negative indexes, iteration; `slide(i)`, `slides()`,
-`titles()`, `text(...)`, `text_reporting(...)`, `slide_texts(...)`. Text
-methods take `notes`, `furniture`, `hidden_shapes`, `hidden_slides`.
+`titles()`, `text(...)`, `text_reporting(...)`, `slide_texts(...)`,
+`core_properties()`, `app_properties()`, `sections()`. Text methods take
+`notes`, `furniture`, `hidden_shapes`, `hidden_slides`, `alt_text`,
+`comments`.
 
 ## `Slide`
 
 `index`, `number`, `part`, `hidden`, `name`, `title`, `warnings`;
-`text(furniture=, hidden_shapes=)`, `paragraphs()`, `notes()`, `tables()`,
-`shapes()`, `images()`, `image_bytes(image)`, `hyperlink(rel_id)`.
+`text(furniture=, hidden_shapes=, alt_text=)`, `paragraphs()`, `notes()`,
+`comments()`, `tables()`, `shapes()`, `images()`, `image_bytes(image)`,
+`embedded_objects()`, `object_bytes(object)`, `hyperlink(rel_id)`.
+
+## `CoreProperties`, `AppProperties`
+
+Every field of `docProps/core.xml` as optional text (`title`, `subject`,
+`creator`, `keywords`, `description`, `last_modified_by`, `revision`,
+`created`, `modified`, `last_printed`, `category`, `content_status`,
+`language`, `identifier`, `version`); `docProps/app.xml` as `application`,
+`app_version`, `company`, `manager`, `template`, `presentation_format`,
+the counts `slides`, `notes`, `hidden_slides`, `words`, `paragraphs`,
+`total_time`, and `titles_of_parts`.
+
+## `Section`
+
+`name`, `slides` (zero-based slide indexes).
+
+## `Comment`
+
+`author`, `initials`, `date`, `text`, `reply`.
+
+## `EmbeddedObject`
+
+`shape_id`, `prog_id`, `rel_id`, `part`, `content_type`, `external`.
 
 ## `Shape`
 

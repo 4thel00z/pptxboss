@@ -17,8 +17,29 @@ struct SlideInfo {
     shapes: usize,
     pictures: usize,
     tables: usize,
+    objects: usize,
     has_notes: bool,
+    has_comments: bool,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SectionInfo {
+    name: String,
+    /// One-based slide numbers.
+    slides: Vec<usize>,
+}
+
+#[derive(Serialize)]
+struct Properties {
+    title: Option<String>,
+    subject: Option<String>,
+    creator: Option<String>,
+    last_modified_by: Option<String>,
+    created: Option<String>,
+    modified: Option<String>,
+    application: Option<String>,
+    app_version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -31,6 +52,8 @@ struct Info {
     slide_size_type: Option<String>,
     masters: usize,
     parts: usize,
+    properties: Properties,
+    sections: Vec<SectionInfo>,
     slide_list: Vec<SlideInfo>,
 }
 
@@ -53,7 +76,12 @@ fn collect(doc: &Document, file: &Path) -> Info {
                     .iter()
                     .filter(|shape| matches!(shape.content, pptxboss_core::Content::Table(_)))
                     .count(),
+                objects: shapes
+                    .iter()
+                    .filter(|shape| matches!(shape.content, pptxboss_core::Content::Ole(_)))
+                    .count(),
                 has_notes: slide.notes_part().ok().flatten().is_some(),
+                has_comments: slide.comments_part().ok().flatten().is_some(),
                 error: None,
             }
         }
@@ -65,7 +93,9 @@ fn collect(doc: &Document, file: &Path) -> Info {
             shapes: 0,
             pictures: 0,
             tables: 0,
+            objects: 0,
             has_notes: false,
+            has_comments: false,
             error: Some(err.to_string()),
         },
     });
@@ -81,6 +111,8 @@ fn collect(doc: &Document, file: &Path) -> Info {
         })
         .collect();
     let size = presentation.slide_size.as_ref();
+    let core = doc.core_properties().ok().flatten().unwrap_or_default();
+    let app = doc.app_properties().ok().flatten().unwrap_or_default();
     Info {
         file: file.display().to_string(),
         presentation_part: doc.presentation_part().to_string(),
@@ -90,8 +122,46 @@ fn collect(doc: &Document, file: &Path) -> Info {
         slide_size_type: size.and_then(|size| size.kind.clone()),
         masters: presentation.masters.len(),
         parts: doc.package().parts().len(),
+        properties: Properties {
+            title: core.title,
+            subject: core.subject,
+            creator: core.creator,
+            last_modified_by: core.last_modified_by,
+            created: core.created,
+            modified: core.modified,
+            application: app.application,
+            app_version: app.app_version,
+        },
+        sections: doc
+            .sections()
+            .into_iter()
+            .map(|section| SectionInfo {
+                name: section.name,
+                slides: section.slides.iter().map(|index| index + 1).collect(),
+            })
+            .collect(),
         slide_list,
     }
+}
+
+/// `1-3, 5` for a run of one-based slide numbers.
+fn number_ranges(numbers: &[usize]) -> String {
+    let mut ranges: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < numbers.len() {
+        let start = numbers[i];
+        let mut end = start;
+        while i + 1 < numbers.len() && numbers[i + 1] == end + 1 {
+            end = numbers[i + 1];
+            i += 1;
+        }
+        ranges.push(match start == end {
+            true => start.to_string(),
+            false => format!("{start}-{end}"),
+        });
+        i += 1;
+    }
+    ranges.join(", ")
 }
 
 pub fn run(doc: &Document, file: &Path, json: bool) -> Result<(), Failure> {
@@ -121,6 +191,27 @@ pub fn run(doc: &Document, file: &Path, json: bool) -> Result<(), Failure> {
     }
     writeln!(out, "masters:      {}", info.masters)?;
     writeln!(out, "parts:        {}", info.parts)?;
+    let properties = [
+        ("title", &info.properties.title),
+        ("subject", &info.properties.subject),
+        ("creator", &info.properties.creator),
+        ("modified by", &info.properties.last_modified_by),
+        ("created", &info.properties.created),
+        ("modified", &info.properties.modified),
+        ("application", &info.properties.application),
+    ];
+    for (label, value) in properties {
+        if let Some(value) = value {
+            writeln!(out, "{:<13} {value}", format!("{label}:"))?;
+        }
+    }
+    for section in &info.sections {
+        let slides = match section.slides.is_empty() {
+            true => "no slides".to_string(),
+            false => format!("slides {}", number_ranges(&section.slides)),
+        };
+        writeln!(out, "section:      {} ({slides})", section.name)?;
+    }
     if info.slide_list.is_empty() {
         return Ok(());
     }
@@ -138,6 +229,12 @@ pub fn run(doc: &Document, file: &Path, json: bool) -> Result<(), Failure> {
         }
         if slide.tables > 0 {
             flags.push("tables");
+        }
+        if slide.objects > 0 {
+            flags.push("objects");
+        }
+        if slide.has_comments {
+            flags.push("comments");
         }
         let flags = match flags.is_empty() {
             true => String::new(),

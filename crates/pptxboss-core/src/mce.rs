@@ -86,7 +86,12 @@ fn requires_understood(reader: &Reader<'_>, choice: &Start<'_>) -> bool {
     if prefixes.peek().is_none() {
         return false;
     }
-    prefixes.all(|prefix| !matches!(reader.resolve(prefix), Ns::Other(_) | Ns::None))
+    prefixes.all(|prefix| {
+        !matches!(
+            reader.resolve(prefix),
+            Ns::Other(_) | Ns::None | Ns::P14 | Ns::P188
+        )
+    })
 }
 
 /// Whether a `Start` for `mc:AlternateContent` would end up dropped: no

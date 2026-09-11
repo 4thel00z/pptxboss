@@ -78,6 +78,10 @@ pub struct Deck {
     /// Media parts `(name, bytes, content type extension)`.
     media: Vec<(String, Vec<u8>)>,
     slide_size: (i64, i64),
+    /// Extra relationships of the presentation part `(id, type tail, target)`.
+    presentation_rels: Vec<(String, String, String)>,
+    /// XML appended inside `p:presentation`, after `p:defaultTextStyle`.
+    presentation_extra: String,
 }
 
 impl Deck {
@@ -118,6 +122,21 @@ impl Deck {
 
     pub fn slide_size(mut self, cx: i64, cy: i64) -> Self {
         self.slide_size = (cx, cy);
+        self
+    }
+
+    /// Adds a relationship from the presentation part; `type_tail` follows
+    /// the officeDocument relationship prefix, or is a full URI when it
+    /// contains `://`.
+    pub fn presentation_rel(mut self, id: &str, type_tail: &str, target: &str) -> Self {
+        self.presentation_rels
+            .push((id.to_string(), type_tail.to_string(), target.to_string()));
+        self
+    }
+
+    /// Appends XML inside the presentation element, e.g. an `p:extLst`.
+    pub fn presentation_xml(mut self, xml: &str) -> Self {
+        self.presentation_extra.push_str(xml);
         self
     }
 
@@ -224,13 +243,20 @@ impl Deck {
             false,
         ));
         next_rel += 1;
+        for (id, tail, target) in &self.presentation_rels {
+            let rel_type = match tail.contains("://") {
+                true => tail.clone(),
+                false => format!("{REL}{tail}"),
+            };
+            pres_rels.push((id.clone(), rel_type, target.clone(), false));
+        }
         pres_rels.push((
             format!("rId{next_rel}"),
             format!("{REL}theme"),
             "theme/theme1.xml".into(),
             false,
         ));
-        pres.push_str(&format!(r#"<p:sldSz cx="{}" cy="{}"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr></p:defaultTextStyle></p:presentation>"#, self.slide_size.0, self.slide_size.1));
+        pres.push_str(&format!(r#"<p:sldSz cx="{}" cy="{}"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr></p:defaultTextStyle>{}</p:presentation>"#, self.slide_size.0, self.slide_size.1, self.presentation_extra));
         parts.push(("ppt/presentation.xml".into(), pres.into_bytes()));
         let pres_rel_refs: Vec<(&str, &str, &str, bool)> = pres_rels
             .iter()
@@ -316,12 +342,11 @@ impl Deck {
                 ));
             }
             for (id, tail, target, external) in &slide.extra_rels {
-                slide_rels.push((
-                    id.clone(),
-                    format!("{REL}{tail}"),
-                    target.clone(),
-                    *external,
-                ));
+                let rel_type = match tail.contains("://") {
+                    true => tail.clone(),
+                    false => format!("{REL}{tail}"),
+                };
+                slide_rels.push((id.clone(), rel_type, target.clone(), *external));
             }
             let refs: Vec<(&str, &str, &str, bool)> = slide_rels
                 .iter()
