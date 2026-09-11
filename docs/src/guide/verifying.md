@@ -26,6 +26,7 @@ Each finding prints as `severity CODE part (location): message [clause]`.
 ```python
 for finding in pptxboss.check("deck.pptx"):
     finding.severity, finding.code, finding.clause, finding.part, finding.location, finding.message
+report = pptxboss.check_report("deck.pptx")   # .findings, .parts_checked, .truncated, .is_clean
 pptxboss.rules()
 ```
 

@@ -60,3 +60,49 @@ def test_markdown_and_errors() -> None:
     with pytest.raises(pptxboss.PptxError, match="image"):
         svg.to_bytes()
     assert repr(write.Slide("t")).startswith("write.Slide(")
+
+
+def test_run_formatting_round_trips() -> None:
+    deck = write.Presentation()
+    deck.add(
+        write.Slide("Formatted")
+        .bullet("emphasis", italic=True)
+        .paragraph("loud", bold=True, size=32)
+        .text_box(1.0, 1.0, 4.0, 1.0, [write.Paragraph("Claim", bold=True, italic=True, size=28), "plain"])
+        .text_box(1.0, 3.0, 4.0, 1.0, ["a", "b"], bullets=True, italic=True)
+    )
+    doc = pptxboss.Document(data=deck.to_bytes())
+    shapes = doc[0].shapes()
+    body = shapes[1].paragraphs
+    assert body[0].runs[0].italic is True and body[0].runs[0].bold is None
+    assert body[1].runs[0].bold is True and body[1].runs[0].size == 3200
+    box = shapes[2].paragraphs
+    assert box[0].runs[0].bold is True and box[0].runs[0].italic is True and box[0].runs[0].size == 2800
+    assert box[1].runs[0].bold is None and box[1].runs[0].italic is None
+    assert all(paragraph.runs[0].italic is True for paragraph in shapes[3].paragraphs)
+    assert doc[0].text() == "Formatted\nemphasis\nloud\nClaim\nplain\na\nb"
+    assert pptxboss.check(data=deck.to_bytes()) == []
+
+
+def test_metadata_and_custom_size_round_trip() -> None:
+    deck = write.Presentation(
+        size=(10.0, 5.625),
+        title="Review",
+        creator="tests",
+        subject="Q3",
+        keywords="quarterly, review",
+        timestamp="2026-01-02T03:04:05Z",
+    )
+    deck.add(write.Slide("Only"))
+    doc = pptxboss.Document(data=deck.to_bytes())
+    assert doc.slide_size == (9144000, 5143500)
+    assert doc.slide_size_type is None
+    core = doc.core_properties()
+    assert core is not None
+    assert (core.title, core.creator, core.subject, core.keywords) == ("Review", "tests", "Q3", "quarterly, review")
+    assert core.created == "2026-01-02T03:04:05Z" and core.modified == "2026-01-02T03:04:05Z"
+    standard = write.from_markdown("# Hi\n", size=(10.0, 7.5))
+    assert pptxboss.Document(data=standard.to_bytes()).slide_size_type == "screen4x3"
+    with pytest.raises(ValueError):
+        write.Presentation(size="letter")
+    assert pptxboss.check(data=deck.to_bytes()) == []

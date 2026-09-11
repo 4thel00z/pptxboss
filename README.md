@@ -129,9 +129,12 @@ props = doc.core_properties()          # title, creator, created, modified, ...
 for section in doc.sections():         # name and zero-based slide indexes
     print(section.name, section.slides)
 text, warnings = doc.text_reporting()  # whole deck, plus what was skipped
+text, report = doc.extract(indexes=[0, 2])  # chosen slides, structured report
+package = doc.package()                # raw parts, content types, relationships
 
 for finding in pptxboss.check("deck.pptx"):   # the verifier, most severe first
     print(finding.severity, finding.code, finding.clause, finding.message)
+report = pptxboss.check_report("deck.pptx")   # findings plus parts_checked, truncated
 ```
 
 ```rust
