@@ -20,6 +20,9 @@ mod text;
     about = "PresentationML (.pptx) toolkit: inspect, extract text and notes, verify against ECMA-376, create decks"
 )]
 struct Cli {
+    /// Cap the worker threads used to parse slides (default: every core).
+    #[arg(long, global = true, value_name = "N")]
+    threads: Option<usize>,
     #[command(subcommand)]
     command: Command,
 }
@@ -112,8 +115,11 @@ impl From<std::io::Error> for Failure {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let threads = cli.threads.unwrap_or(0);
     let result = match cli.command {
-        Command::Info { file, json } => open(&file).and_then(|doc| info::run(&doc, &file, json)),
+        Command::Info { file, json } => {
+            open(&file, threads).and_then(|doc| info::run(&doc, &file, json))
+        }
         Command::Text {
             file,
             notes,
@@ -130,7 +136,7 @@ fn main() -> ExitCode {
                 hidden_slides: !skip_hidden,
                 ..TextOptions::default()
             };
-            open(&file).and_then(|doc| text::run(&doc, &options, headings, json))
+            open(&file, threads).and_then(|doc| text::run(&doc, &options, headings, json))
         }
         Command::Check {
             file,
@@ -154,11 +160,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn open(file: &PathBuf) -> Result<Document, Failure> {
-    Document::open(file).map_err(|err| Failure {
-        message: format!("{}: {err}", file.display()),
-        code: 1,
-    })
+fn open(file: &PathBuf, threads: usize) -> Result<Document, Failure> {
+    Document::open(file)
+        .map(|doc| doc.with_threads(threads))
+        .map_err(|err| Failure {
+            message: format!("{}: {err}", file.display()),
+            code: 1,
+        })
 }
 
 /// Prints report warnings to stderr, one per line.

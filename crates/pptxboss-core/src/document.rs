@@ -62,12 +62,31 @@ struct Shared {
 
 /// A thread-safe handle from which a [`Document`] is rebuilt; see [`Document::from_seed`].
 #[derive(Clone)]
-pub struct DocumentSeed(Arc<Shared>);
+pub struct DocumentSeed {
+    shared: Arc<Shared>,
+    threads: usize,
+}
+
+impl DocumentSeed {
+    /// The worker limit for [`Document::map_slides`]; 0 means every core.
+    pub fn threads(&self) -> usize {
+        self.threads
+    }
+}
 
 /// An open presentation.
 pub struct Document {
     package: Package,
     shared: Arc<Shared>,
+    threads: usize,
+}
+
+/// The default worker limit: `PPTXBOSS_THREADS` when set to a number, else 0 (every core).
+fn threads_from_env() -> usize {
+    std::env::var("PPTXBOSS_THREADS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 impl Document {
@@ -132,19 +151,43 @@ impl Document {
             defects,
             package: package.seed(),
         });
-        Ok(Self { package, shared })
+        Ok(Self {
+            package,
+            shared,
+            threads: threads_from_env(),
+        })
+    }
+
+    /// The worker limit for [`Document::map_slides`]; 0 means every core.
+    pub fn threads(&self) -> usize {
+        self.threads
+    }
+
+    /// Limits [`Document::map_slides`] to `threads` workers; 0 restores every core.
+    pub fn set_threads(&mut self, threads: usize) {
+        self.threads = threads;
+    }
+
+    /// Builder form of [`Document::set_threads`].
+    pub fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads;
+        self
     }
 
     /// A handle that can cross threads.
     pub fn seed(&self) -> DocumentSeed {
-        DocumentSeed(Arc::clone(&self.shared))
+        DocumentSeed {
+            shared: Arc::clone(&self.shared),
+            threads: self.threads,
+        }
     }
 
     /// A document over the same archive and presentation, with its own caches.
     pub fn from_seed(seed: DocumentSeed) -> Self {
         Self {
-            package: Package::from_seed(seed.0.package.clone()),
-            shared: seed.0,
+            package: Package::from_seed(seed.shared.package.clone()),
+            shared: seed.shared,
+            threads: seed.threads,
         }
     }
 
@@ -211,18 +254,26 @@ impl Document {
         })
     }
 
+    /// Workers for `count` slides under the configured limit.
+    fn worker_count(&self, count: usize) -> usize {
+        let limit = match self.threads {
+            0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
+            limit => limit,
+        };
+        limit.min(count)
+    }
+
     /// Applies `f` to every slide, spreading slides across the available
-    /// cores. Results come back in slide order. Each worker thread builds
-    /// its own `Document` from a seed, so nothing is shared but the archive.
+    /// cores (see [`Document::set_threads`]). Results come back in slide
+    /// order. Each worker thread builds its own `Document` from a seed, so
+    /// nothing is shared but the archive.
     pub fn map_slides<T, F>(&self, f: F) -> Vec<T>
     where
         T: Send,
         F: Fn(Result<Slide<'_>>) -> T + Sync,
     {
         let count = self.slide_count();
-        let workers = std::thread::available_parallelism()
-            .map_or(1, |n| n.get())
-            .min(count);
+        let workers = self.worker_count(count);
         if workers <= 1 {
             return (0..count).map(|index| f(self.slide(index))).collect();
         }

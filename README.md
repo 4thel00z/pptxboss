@@ -26,14 +26,17 @@ refusing, reporting every skip.
 ## Highlights
 
 - **Clean-room engine**: implemented from ECMA-376 Parts 1 to 4 in safe Rust.
-  The ZIP container, CRC-32, XML tokenizer, Open Packaging Conventions and
-  PresentationML model are all in-tree; the only compression dependency is
-  the pure-Rust `zlib-rs` inflate.
+  The ZIP container, DEFLATE decoder, CRC-32, XML tokenizer, Open Packaging
+  Conventions and PresentationML model are all in-tree; the reader has no
+  compression dependency.
 - **Reads only what it needs**: the central directory is parsed once, then
   parts are read with positioned reads. Extracting text from a 42 MB deck
   never touches its 40 MB of media.
-- **Parallel by default**: slides are spread across cores with a
-  work-stealing counter; each worker has private caches over a shared archive.
+- **Fast on one core, faster on all**: a deck opens with one positioned
+  read for small files and one per part otherwise, and slides are spread
+  across cores with a work-stealing counter, each worker with private caches
+  over a shared archive. `--threads 1` keeps everything on the calling
+  thread and is still the fastest engine measured ([benchmarks](#benchmarks)).
 - **Strict and Transitional alike**: both namespace families resolve to the
   same element ids, and `mc:AlternateContent` is resolved per Part 3.
 - **Two views of a package**: `Package` keeps every defect as written for
@@ -44,10 +47,11 @@ refusing, reporting every skip.
   finding carries a stable code, a severity and the clause it enforces.
   Real PowerPoint output verifies clean; the rules were calibrated against
   790 public test decks.
-- **Fastest measured**: 934 files/s extracting text over a 631-file
-  public corpus, about 2.5x the next fastest Rust engine and 17x the
-  most-used Python library, with paragraph-for-paragraph agreement on every
-  gated file ([benchmarks](#benchmarks)).
+- **Fastest measured**: 1,121 files/s extracting text over a 631-file
+  public corpus, and 1,062 files/s when held to one thread: about 3x the
+  next fastest Rust engine either way and 27x the most-used Python library,
+  with paragraph-for-paragraph agreement on every gated file
+  ([benchmarks](#benchmarks)).
 - **Reads Strict decks**: the Open XML SDK's Strict-namespace test decks,
   which most readers refuse, read and verify like any other.
 
@@ -65,6 +69,7 @@ pptxboss info deck.pptx             # slide count, size, one line per slide
 pptxboss text deck.pptx             # slide text, slides separated by blank lines
 pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx      # [{"number": 1, "text": "..."}, ...]
+pptxboss text --threads 1 deck.pptx # cap the worker threads (default: every core)
 pptxboss check deck.pptx            # verify against ECMA-376; exit 1 on errors
 pptxboss check --json --quiet deck.pptx
 pptxboss rules                      # every rule with its code, severity and clause
@@ -82,7 +87,7 @@ never inherited from a layout or master, so empty placeholders stay empty.
 ```python
 import pptxboss
 
-doc = pptxboss.Document("deck.pptx")
+doc = pptxboss.Document("deck.pptx")   # threads=1 to stay on one core
 print(doc.slide_count, doc.slide_size)
 for slide in doc:                      # slides parse lazily
     print(slide.number, slide.title)
@@ -137,9 +142,9 @@ through `pptxboss-core`, and passes `pptxboss check` with no findings.
 
 ## Benchmarks
 
-**pptxboss is the fastest library measured, about 2.5x the next fastest
-Rust engine and 17x python-pptx, with paragraph-for-paragraph agreement on
-every file that passes the gate.**
+**pptxboss is the fastest library measured, on one thread as well as on
+all cores: about 3x the next fastest Rust engine and 27x python-pptx, with
+paragraph-for-paragraph agreement on every file that passes the gate.**
 
 Text extraction from Python over the 737 `.pptx` files of the LibreOffice,
 Apache POI, python-pptx, pandoc and Open XML SDK test suites, best of 3 per
@@ -153,26 +158,39 @@ pptxboss reports as unreadable.
 
 | Library | files/s | slides/s |
 |---|--:|--:|
-| pptxboss | 933.7 | 2,027 |
-| office-oxide | 379.7 | 824 |
-| undoc | 256.8 | 558 |
-| kreuzberg | 182.7 | 397 |
-| python-pptx | 55.5 | 121 |
-| markitdown | 6.6 | 14 |
+| pptxboss, all cores | 1,121 | 2,434 |
+| pptxboss, one thread (`threads=1`) | 1,062 | 2,306 |
+| office-oxide | 352 | 765 |
+| undoc | 207 | 448 |
+| kreuzberg | 165 | 357 |
+| python-pptx | 41 | 89 |
+| markitdown | 5.2 | 11 |
 
 <details>
 <summary>Method and fine print</summary>
 
 Every engine is called from Python through its own adapter. pptxboss
-spreads a deck's slides across cores; the other Rust engines run one
-thread per file, which is how they ship. The test-suite corpus is small
-files, so the row is dominated by per-file overhead: opening the archive,
-finding the presentation, parsing a few slides. On two real-world
-PowerPoint decks (7 and 43 slides, 3 MB and 42 MB) the same harness gives
-2,473 slides/s for pptxboss against 909 for office-oxide. In-process, the
-43-slide deck opens in 1.25 ms with positioned reads (7 ms when the whole
-file is read first), tokenizes its 443 KiB of slide XML in 3.5 ms, and
-yields its text in 10 ms on one thread and 4.5 ms on twelve.
+spreads a deck's slides across cores unless `threads=1` holds it to the
+calling thread; the one-thread row is the like-for-like comparison, since
+the other Rust engines run one thread per file (office-oxide's wheel was
+measured at 0.9 to 1.1 CPU seconds per wall second). The test-suite corpus
+is small files, so the rows are dominated by per-file cost: opening the
+file, one positioned read for the whole archive when it is small, parsing
+the directory, the relationships and a few slides.
+
+On two real-world PowerPoint decks (7 and 43 slides, 3 MB and 42 MB) the
+same harness, best of 40:
+
+| Deck | office-oxide | pptxboss, one thread | pptxboss, all cores |
+|---|--:|--:|--:|
+| 43 slides, wall | 36.5 ms | 10.8 ms | 3.9 ms |
+| 43 slides, CPU | 39.0 ms | 12.1 ms | 13.7 ms |
+| 7 slides, wall | 9.0 ms | 2.4 ms | 1.7 ms |
+| 7 slides, CPU | 9.8 ms | 2.6 ms | 4.0 ms |
+
+In-process, the 43-slide deck opens in 1.4 ms with positioned reads,
+tokenizes its 443 KiB of slide XML in about 4 ms, and yields its text in
+11.5 ms on one thread and 4.2 ms on twelve.
 
 The gate compares pptxboss against python-pptx only, because the other
 engines do not expose per-slide paragraphs. Numbers are machine-dependent;

@@ -640,12 +640,15 @@ fn box_paragraphs(paragraphs: &[Paragraph]) -> String {
     xml
 }
 
+/// A relationship of a written part: id, type, target.
+type Rel = (String, String, String);
+
 fn slide_xml(
     ctx: &mut Ctx<'_>,
     slide: &Slide,
     n: usize,
     frames: &Frames,
-) -> Result<(String, Vec<(String, String, String)>)> {
+) -> Result<(String, Vec<Rel>)> {
     let layout = slide.effective_layout();
     let mut rels = vec![(
         "rId1".to_string(),

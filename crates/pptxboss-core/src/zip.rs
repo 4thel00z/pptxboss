@@ -18,7 +18,6 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-use flate2::{Decompress, FlushDecompress, Status};
 use memchr::memmem;
 
 use crate::crc32::crc32;
@@ -36,7 +35,11 @@ const ZIP64_LOCATOR_LEN: usize = 20;
 const ZIP64_END_RECORD_LEN: usize = 56;
 const CENTRAL_HEADER_LEN: usize = 46;
 const LOCAL_HEADER_LEN: usize = 30;
-const MAX_COMMENT_LEN: usize = 0xffff;
+/// Files up to this size are read whole in one call and kept.
+const WHOLE_FILE_LEN: u64 = 256 * 1024;
+/// For larger files, the bytes read from the end in one call and kept: the
+/// end records (a comment can be 65535 bytes long) and the central directory.
+const TAIL_LEN: u64 = 66 * 1024;
 const ZIP64_EXTRA_ID: u16 = 0x0001;
 
 /// Compression method 0: the data is stored as-is.
@@ -60,6 +63,10 @@ pub trait Source: Send + Sync {
     }
     /// Fills `buf` from `offset`; fails if the range is out of bounds.
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()>;
+    /// The whole content when it already sits in memory, so reads can borrow it.
+    fn as_bytes(&self) -> Option<&[u8]> {
+        None
+    }
 }
 
 impl Source for Vec<u8> {
@@ -73,6 +80,10 @@ impl Source for Vec<u8> {
         let slice = self.get(start..end).ok_or_else(out_of_bounds)?;
         buf.copy_from_slice(slice);
         Ok(())
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        Some(self)
     }
 }
 
@@ -218,24 +229,90 @@ pub struct Layout {
 /// A parsed archive: central directory in memory, entry data on demand.
 pub struct Archive {
     source: Arc<dyn Source>,
+    /// The tail of the file as read at open; empty for in-memory sources.
+    cache: Box<[u8]>,
+    cache_start: u64,
     entries: Vec<Entry>,
     index: FastMap<String, usize>,
     duplicates: Vec<usize>,
     layout: Layout,
 }
 
+/// Where a requested byte range was found.
+#[derive(Clone, Copy)]
+enum Located {
+    /// At this index of the source's in-memory bytes.
+    Bytes(usize),
+    /// At this index of the tail cache.
+    Cache(usize),
+    /// Read into the caller's scratch buffer.
+    Scratch,
+}
+
+/// Serves `len` bytes at `offset` from in-memory bytes or `cache` when
+/// possible, reading into `scratch` otherwise.
+fn locate_range(
+    source: &dyn Source,
+    cache: &[u8],
+    cache_start: u64,
+    offset: u64,
+    len: usize,
+    scratch: &mut Vec<u8>,
+) -> io::Result<Located> {
+    let end = offset.checked_add(len as u64).ok_or_else(out_of_bounds)?;
+    if let Some(bytes) = source.as_bytes() {
+        if end > bytes.len() as u64 {
+            return Err(out_of_bounds());
+        }
+        return Ok(Located::Bytes(offset as usize));
+    }
+    if offset >= cache_start && end <= cache_start + cache.len() as u64 {
+        return Ok(Located::Cache((offset - cache_start) as usize));
+    }
+    scratch.clear();
+    scratch.resize(len, 0);
+    source.read_at(offset, scratch)?;
+    Ok(Located::Scratch)
+}
+
+fn view_range<'a>(
+    source: &'a dyn Source,
+    cache: &'a [u8],
+    located: Located,
+    len: usize,
+    scratch: &'a [u8],
+) -> &'a [u8] {
+    match located {
+        Located::Bytes(start) => &source.as_bytes().unwrap_or_default()[start..start + len],
+        Located::Cache(start) => &cache[start..start + len],
+        Located::Scratch => &scratch[..len],
+    }
+}
+
 impl Archive {
     /// Parses the central directory of `source`.
     pub fn open(source: Arc<dyn Source>) -> Result<Self> {
         let len = source.len();
-        let tail_len = usize::try_from(len.min(
-            (END_RECORD_LEN + MAX_COMMENT_LEN + ZIP64_LOCATOR_LEN + ZIP64_END_RECORD_LEN) as u64,
-        ))
-        .map_err(|_| Error::NotZip)?;
+        let tail_len = match len <= WHOLE_FILE_LEN {
+            true => len,
+            false => TAIL_LEN,
+        };
+        let tail_len = usize::try_from(tail_len).map_err(|_| Error::NotZip)?;
         let tail_start = len - tail_len as u64;
-        let mut tail = vec![0u8; tail_len];
-        source.read_at(tail_start, &mut tail)?;
-        let Some(end_pos) = find_end_record(&tail) else {
+        let cache: Box<[u8]> = match source.as_bytes() {
+            Some(_) => Box::default(),
+            None => {
+                let mut tail = vec![0u8; tail_len];
+                source.read_at(tail_start, &mut tail)?;
+                tail.into_boxed_slice()
+            }
+        };
+        let cache_start = tail_start;
+        let tail: &[u8] = match source.as_bytes() {
+            Some(bytes) => &bytes[tail_start as usize..],
+            None => &cache,
+        };
+        let Some(end_pos) = find_end_record(tail) else {
             return Self::reconstruct(source, len);
         };
         let end = &tail[end_pos..];
@@ -302,8 +379,16 @@ impl Archive {
         let readable = records_start.saturating_sub(central_start);
         let central_len = usize::try_from(central_size.min(readable))
             .map_err(|_| Error::zip(central_start, "central directory too large"))?;
-        let mut central = vec![0u8; central_len];
-        source.read_at(central_start, &mut central)?;
+        let mut scratch = Vec::new();
+        let located = locate_range(
+            source.as_ref(),
+            &cache,
+            cache_start,
+            central_start,
+            central_len,
+            &mut scratch,
+        )?;
+        let central = view_range(source.as_ref(), &cache, located, central_len, &scratch);
         layout.trailing_garbage += readable.saturating_sub(central_size);
 
         let mut entries =
@@ -359,6 +444,8 @@ impl Archive {
 
         Ok(Self {
             source,
+            cache,
+            cache_start,
             entries,
             index,
             duplicates,
@@ -371,6 +458,8 @@ impl Archive {
     /// cut before its directory). Entries with a data descriptor take their
     /// sizes from the descriptor found before the next header.
     fn reconstruct(source: Arc<dyn Source>, len: u64) -> Result<Self> {
+        let cache: Box<[u8]> = Box::default();
+        let cache_start = 0;
         let total = usize::try_from(len).map_err(|_| Error::NotZip)?;
         let mut data = vec![0u8; total];
         source.read_at(0, &mut data)?;
@@ -446,6 +535,8 @@ impl Archive {
         };
         Ok(Self {
             source,
+            cache,
+            cache_start,
             entries,
             index,
             duplicates,
@@ -489,21 +580,75 @@ impl Archive {
         &self.layout
     }
 
+    /// Serves `len` bytes at `offset`, borrowing them from memory when the
+    /// source or the tail cache holds them and reading into `scratch` otherwise.
+    fn locate(&self, offset: u64, len: usize, scratch: &mut Vec<u8>) -> Result<Located> {
+        locate_range(
+            self.source.as_ref(),
+            &self.cache,
+            self.cache_start,
+            offset,
+            len,
+            scratch,
+        )
+        .map_err(|_| Error::zip(offset, "read past the end of the archive"))
+    }
+
+    fn view<'a>(&'a self, located: Located, len: usize, scratch: &'a [u8]) -> &'a [u8] {
+        view_range(self.source.as_ref(), &self.cache, located, len, scratch)
+    }
+
+    /// The compressed bytes of `entry`: one read covering the local header
+    /// and the data when the sizes are known, a second read otherwise.
+    fn raw_slice<'a>(&'a self, entry: &Entry, scratch: &'a mut Vec<u8>) -> Result<&'a [u8]> {
+        let offset = entry.header_offset.wrapping_add(self.layout.offset_shift);
+        let available = self
+            .layout
+            .len
+            .checked_sub(offset)
+            .filter(|available| *available >= LOCAL_HEADER_LEN as u64)
+            .ok_or_else(|| Error::zip(offset, "local header out of bounds"))?;
+        let size_hint = match entry.compressed_size > 0 || entry.uncompressed_size == 0 {
+            true => entry.compressed_size,
+            false => 0,
+        };
+        let want = (LOCAL_HEADER_LEN + entry.raw_name.len() + 64) as u64 + size_hint;
+        let want = usize::try_from(want.min(available))
+            .map_err(|_| Error::zip(offset, "entry too large"))?;
+        let first = self.locate(offset, want, scratch)?;
+        let (start, size, fits) = {
+            let block = self.view(first, want, scratch);
+            if block[..4] != LOCAL_HEADER_SIG {
+                return Err(Error::zip(offset, "bad local header signature"));
+            }
+            let start =
+                LOCAL_HEADER_LEN + usize::from(u16_at(block, 26)) + usize::from(u16_at(block, 28));
+            let size = self.compressed_len(entry, offset + start as u64)?;
+            (start, size, start + size <= block.len())
+        };
+        if fits {
+            return Ok(&self.view(first, want, scratch)[start..start + size]);
+        }
+        let second = self.locate(offset + start as u64, size, scratch)?;
+        Ok(self.view(second, size, scratch))
+    }
+
     /// Reads and checks the local header of `entry`.
     pub fn local_header(&self, entry: &Entry) -> Result<LocalHeader> {
         let offset = entry.header_offset.wrapping_add(self.layout.offset_shift);
-        let mut fixed = [0u8; LOCAL_HEADER_LEN];
-        self.source
-            .read_at(offset, &mut fixed)
+        let mut scratch = Vec::new();
+        let located = self
+            .locate(offset, LOCAL_HEADER_LEN, &mut scratch)
             .map_err(|_| Error::zip(offset, "local header out of bounds"))?;
+        let mut fixed = [0u8; LOCAL_HEADER_LEN];
+        fixed.copy_from_slice(self.view(located, LOCAL_HEADER_LEN, &scratch));
         if fixed[..4] != LOCAL_HEADER_SIG {
             return Err(Error::zip(offset, "bad local header signature"));
         }
         let name_len = usize::from(u16_at(&fixed, 26));
         let extra_len = u16_at(&fixed, 28);
-        let mut raw_name = vec![0u8; name_len];
-        self.source
-            .read_at(offset + LOCAL_HEADER_LEN as u64, &mut raw_name)?;
+        let located = self.locate(offset + LOCAL_HEADER_LEN as u64, name_len, &mut scratch)?;
+        let raw_name = self.view(located, name_len, &scratch).to_vec();
         Ok(LocalHeader {
             version_needed: u16_at(&fixed, 4),
             flags: u16_at(&fixed, 6),
@@ -519,12 +664,13 @@ impl Archive {
 
     /// Reads the compressed bytes of `entry` into `out` (cleared first).
     pub fn read_raw(&self, entry: &Entry, out: &mut Vec<u8>) -> Result<()> {
-        let header = self.local_header(entry)?;
-        let size = self.compressed_len(entry, header.data_offset)?;
-        out.clear();
-        out.resize(size, 0);
-        self.source.read_at(header.data_offset, out)?;
-        Ok(())
+        COMPRESSED.with(|cell| {
+            let mut scratch = cell.borrow_mut();
+            let raw = self.raw_slice(entry, &mut scratch)?;
+            out.clear();
+            out.extend_from_slice(raw);
+            Ok(())
+        })
     }
 
     /// Reads and decompresses `entry` into `out` (cleared first).
@@ -538,11 +684,11 @@ impl Archive {
         match entry.method {
             METHOD_STORED => self.read_raw(entry, out),
             METHOD_DEFLATE => COMPRESSED.with(|cell| {
-                let mut compressed = cell.borrow_mut();
-                self.read_raw(entry, &mut compressed)?;
+                let mut scratch = cell.borrow_mut();
+                let raw = self.raw_slice(entry, &mut scratch)?;
                 out.clear();
                 let expected = usize::try_from(entry.uncompressed_size).unwrap_or(0);
-                inflate(&compressed, expected, out)
+                inflate(raw, expected, out)
             }),
             other => Err(Error::Unsupported(format!(
                 "zip compression method {other} for {}",
@@ -705,52 +851,13 @@ fn apply_extras(entry: &mut Entry, mut extra: &[u8]) {
 
 /// Inflates a raw DEFLATE stream, pre-sizing `out` to `expected` bytes.
 pub fn inflate(input: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<()> {
-    INFLATER.with(|cell| {
-        let mut decoder = cell.borrow_mut();
-        decoder.reset(false);
-        inflate_with(&mut decoder, input, expected, out)
-    })
+    out.clear();
+    crate::inflate::inflate(input, expected, out)
 }
 
 thread_local! {
-    /// One inflater per thread: its state is large enough that creating
-    /// one per part shows up in profiles.
-    static INFLATER: std::cell::RefCell<Decompress> = std::cell::RefCell::new(Decompress::new(false));
     /// Scratch buffer for compressed bytes read from the source.
     static COMPRESSED: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-
-fn inflate_with(
-    decoder: &mut Decompress,
-    input: &[u8],
-    expected: usize,
-    out: &mut Vec<u8>,
-) -> Result<()> {
-    out.reserve(expected.max(64));
-    loop {
-        let consumed = usize::try_from(decoder.total_in())
-            .unwrap_or(usize::MAX)
-            .min(input.len());
-        let produced = out.len();
-        let status = decoder
-            .decompress_vec(&input[consumed..], out, FlushDecompress::Finish)
-            .map_err(|err| Error::Inflate(err.to_string()))?;
-        if status == Status::StreamEnd {
-            return Ok(());
-        }
-        let in_progress = usize::try_from(decoder.total_in())
-            .unwrap_or(usize::MAX)
-            .min(input.len())
-            > consumed;
-        let out_progress = out.len() > produced;
-        if out.len() == out.capacity() {
-            out.reserve(out.capacity().max(4096));
-            continue;
-        }
-        if !in_progress && !out_progress {
-            return Err(Error::Inflate("truncated deflate stream".into()));
-        }
-    }
 }
 
 #[inline]

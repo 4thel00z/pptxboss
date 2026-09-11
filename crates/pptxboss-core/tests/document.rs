@@ -119,6 +119,14 @@ fn map_slides_runs_in_parallel_and_keeps_order() {
             .join()
             .unwrap();
     assert_eq!(from_thread.as_deref(), Some("Slide 39"));
+    let capped = Document::load(deck.build()).unwrap().with_threads(1);
+    assert_eq!(capped.threads(), 1);
+    assert_eq!(Document::from_seed(capped.seed()).threads(), 1);
+    assert_eq!(
+        capped.map_slides(|slide| slide.unwrap().title().unwrap()),
+        expected
+    );
+    assert_eq!(capped.text(), doc.text());
 }
 
 #[test]

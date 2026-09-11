@@ -191,11 +191,12 @@ impl Presentation {
         if let Some(font) = font {
             inner = inner.font(font);
         }
-        let mut metadata = Metadata::default();
-        metadata.title = title;
-        if let Some(creator) = creator {
-            metadata.creator = creator;
-        }
+        let defaults = Metadata::default();
+        let metadata = Metadata {
+            title,
+            creator: creator.unwrap_or(defaults.creator),
+            ..defaults
+        };
         inner = inner.metadata(metadata);
         Ok(Self { inner })
     }

@@ -28,6 +28,7 @@ pptxboss text deck.pptx                 # slide text; slides separated by a blan
 pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}]
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number placeholders
+pptxboss text --threads 1 deck.pptx     # cap worker threads (default: every core)
 pptxboss check deck.pptx                # exit 0 clean, 1 errors, 2 unreadable
 pptxboss check --json --quiet deck.pptx
 pptxboss rules                          # every rule: severity, code, clause, summary
@@ -51,7 +52,7 @@ notes; `---` starts an untitled slide; other lines are body paragraphs.
 ```python
 import pptxboss
 
-doc = pptxboss.Document("deck.pptx")          # or Document(data=bytes)
+doc = pptxboss.Document("deck.pptx")          # or Document(data=bytes), threads=1 for one core
 doc.slide_count; len(doc); doc.slide_size; doc.slide_size_type
 for slide in doc:                              # lazy, parsed on demand
     slide.number; slide.title; slide.hidden; slide.name
@@ -84,7 +85,8 @@ heavy calls release the GIL. The `.pyi` stubs are the authoritative API.
 Crates: `pptxboss-core` (container, package, document model, text),
 `pptxboss-check` (verifier), `pptxboss-write` (deck creation),
 `pptxboss-cli`. `Document::open` reads only the parts it needs;
-`Document::map_slides` spreads work across cores.
+`Document::map_slides` spreads work across cores, `Document::with_threads`
+caps it.
 
 ## Gotchas
 

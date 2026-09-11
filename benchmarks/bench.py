@@ -38,6 +38,12 @@ def pptxboss_slides(path: str) -> list[list[str]]:
     return [[normalize(line) for p in slide.paragraphs() for line in p.split("\n") if normalize(line)] for slide in doc.slides()]
 
 
+def pptxboss_text_one_thread(path: str) -> str:
+    import pptxboss
+
+    return pptxboss.Document(path, threads=1).text()
+
+
 def pptxboss_text(path: str) -> str:
     import pptxboss
 
@@ -106,6 +112,7 @@ def markitdown_text(path: str) -> str:
 
 TEXT_ENGINES: dict[str, tuple[str, Callable[[str], str]]] = {
     "pptxboss": ("pptxboss", pptxboss_text),
+    "pptxboss-1t": ("pptxboss", pptxboss_text_one_thread),
     "office-oxide": ("office-oxide", office_oxide_text),
     "kreuzberg": ("kreuzberg", kreuzberg_text),
     "undoc": ("undoc", undoc_text),

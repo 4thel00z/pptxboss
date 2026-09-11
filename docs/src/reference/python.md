@@ -2,7 +2,11 @@
 
 The `.pyi` stubs shipped in the package are the authoritative signatures.
 
-## `Document(path=None, *, data=None)`
+## `Document(path=None, *, data=None, threads=None)`
+
+`threads` caps the workers whole-deck calls use; `None` or 0 means every
+core (or `PPTXBOSS_THREADS`), 1 stays on the calling thread. Read back as
+`threads`.
 
 `slide_count`, `path`, `presentation_part`, `slide_size`, `slide_size_type`;
 `len()`, indexing with negative indexes, iteration; `slide(i)`, `slides()`,
@@ -44,4 +48,6 @@ Raised for any processing error. `ValueError` for bad arguments,
 
 Documents and slides are frozen and usable from any thread. Calls that
 read the archive release the GIL and run on a private materialization of
-the document, so calls from different threads run in parallel.
+the document, so calls from different threads run in parallel. Whole-deck
+calls (`slides()`, `titles()`, `text()`, `slide_texts()`,
+`text_reporting()`) spread slides over the cap set at construction.

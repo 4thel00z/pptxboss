@@ -19,15 +19,19 @@ maturin develop --release
 python benchmarks/bench.py /path/to/corpus --sample 200 --repeat 3
 ```
 
-Engines: pptxboss, office-oxide, undoc, kreuzberg, python-pptx,
-markitdown. pptxboss spreads slides across cores; the others run one
-thread per file.
+Engines: pptxboss (all cores), pptxboss-1t (`Document(path, threads=1)`,
+one thread), office-oxide, undoc, kreuzberg, python-pptx, markitdown. The
+other engines run one thread per file; office-oxide's wheel was measured
+at 0.9 to 1.1 CPU seconds per wall second, so the pptxboss-1t row is the
+like-for-like comparison.
 
 Last run (2026-09-11, Apple M3 Pro, `--repeat 3`, 737 files, 636 gated,
-631 common, 1,370 slides): pptxboss 933.7 files/s; office-oxide 379.7;
-undoc 256.8; kreuzberg 182.7; python-pptx 55.5; markitdown 6.6. No file
-was excluded for a paragraph disagreement; `results.json` lists every
-exclusion with its reason.
+631 common, 1,370 slides): pptxboss 1,121.0 files/s; pptxboss-1t 1,062.3;
+office-oxide 352.5; undoc 206.5; kreuzberg 164.5; python-pptx 41.0;
+markitdown 5.2. No file was excluded for a paragraph disagreement;
+`results.json` lists every exclusion with its reason. Rates move with the
+machine's state from run to run (an earlier run the same day gave every
+engine about 15% higher numbers); the ratios between engines hold.
 
 ## Corpus
 

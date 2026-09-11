@@ -13,6 +13,7 @@ pub mod crc32;
 pub mod document;
 pub mod error;
 pub mod hash;
+pub mod inflate;
 pub mod mce;
 pub mod model;
 pub mod opc;

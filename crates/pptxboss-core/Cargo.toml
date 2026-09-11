@@ -11,14 +11,13 @@ categories = ["parser-implementations", "text-processing"]
 
 [dependencies]
 thiserror = "2"
-# Pure-Rust zlib-rs inflate backend: faster than the default miniz_oxide
-# backend and still C-free (keeps the dependency tree free of native code).
-flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 memchr = "2"
 
 [dev-dependencies]
 pptxboss-testkit = { path = "../pptxboss-testkit" }
 criterion = { workspace = true }
+# The reference inflate the in-tree decoder is tested against.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 
 [[bench]]
 name = "read"

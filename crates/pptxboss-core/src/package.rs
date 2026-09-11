@@ -55,11 +55,46 @@ struct Shared {
     archive: Archive,
     parts: Vec<Part>,
     index: FastMap<String, usize>,
-    content_types: ContentTypes,
+    /// The archive entry of `[Content_Types].xml`, parsed on first use:
+    /// reading a deck through its relationships never needs it.
+    content_types_entry: Option<usize>,
+    content_types: std::sync::OnceLock<ParsedContentTypes>,
     /// Defects found while indexing; the name-grammar and derivability
     /// checks are added on first request, since only the verifier reads them.
     base_defects: PackageDefects,
     defects: std::sync::OnceLock<PackageDefects>,
+}
+
+/// The content types stream with what went wrong while reading it.
+#[derive(Default)]
+struct ParsedContentTypes {
+    types: ContentTypes,
+    error: Option<XmlError>,
+    unreadable: Option<String>,
+}
+
+impl ParsedContentTypes {
+    fn read(archive: &Archive, entry: Option<usize>) -> Self {
+        let Some(entry) = entry else {
+            return Self::default();
+        };
+        match archive.read_to_vec(&archive.entries()[entry]) {
+            Err(err) => Self {
+                unreadable: Some(err.to_string()),
+                ..Self::default()
+            },
+            Ok(bytes) => match ContentTypes::parse(&bytes) {
+                Ok(types) => Self {
+                    types,
+                    ..Self::default()
+                },
+                Err(err) => Self {
+                    error: Some(err),
+                    ..Self::default()
+                },
+            },
+        }
+    }
 }
 
 /// A thread-safe handle from which a [`Package`] with fresh caches is made.
@@ -101,7 +136,8 @@ impl Package {
 
     pub fn from_archive(archive: Archive) -> Result<Self> {
         let mut parts = Vec::with_capacity(archive.entries().len());
-        let mut index: FastMap<String, usize> = FastMap::default();
+        let mut index: FastMap<String, usize> =
+            FastMap::with_capacity_and_hasher(archive.entries().len(), Default::default());
         let mut defects = PackageDefects::default();
         let mut content_types_entry = None;
         for (i, entry) in archive.entries().iter().enumerate() {
@@ -129,31 +165,13 @@ impl Package {
             parts.push(Part { name, entry: i });
         }
 
-        let content_types = match content_types_entry {
-            None => {
-                defects.content_types_missing = true;
-                ContentTypes::default()
-            }
-            Some(i) => match archive.read_to_vec(&archive.entries()[i]) {
-                Err(err) => {
-                    defects.content_types_unreadable = Some(err.to_string());
-                    ContentTypes::default()
-                }
-                Ok(bytes) => match ContentTypes::parse(&bytes) {
-                    Ok(types) => types,
-                    Err(err) => {
-                        defects.content_types_error = Some(err);
-                        ContentTypes::default()
-                    }
-                },
-            },
-        };
-
+        defects.content_types_missing = content_types_entry.is_none();
         let shared = Arc::new(Shared {
             archive,
             parts,
             index,
-            content_types,
+            content_types_entry,
+            content_types: std::sync::OnceLock::new(),
             base_defects: defects,
             defects: std::sync::OnceLock::new(),
         });
@@ -187,13 +205,22 @@ impl Package {
         &self.shared.parts
     }
 
+    fn parsed_content_types(&self) -> &ParsedContentTypes {
+        self.shared.content_types.get_or_init(|| {
+            ParsedContentTypes::read(&self.shared.archive, self.shared.content_types_entry)
+        })
+    }
+
     pub fn content_types(&self) -> &ContentTypes {
-        &self.shared.content_types
+        &self.parsed_content_types().types
     }
 
     pub fn defects(&self) -> &PackageDefects {
         self.shared.defects.get_or_init(|| {
             let mut defects = self.shared.base_defects.clone();
+            let parsed = self.parsed_content_types();
+            defects.content_types_error = parsed.error.clone();
+            defects.content_types_unreadable = parsed.unreadable.clone();
             for part in &self.shared.parts {
                 if let Err(reason) = validate_part_name(&part.name) {
                     defects.invalid_names.push((part.name.clone(), reason));
@@ -226,7 +253,7 @@ impl Package {
 
     /// The declared content type of `name` (7.2.3.5).
     pub fn content_type_of(&self, name: &str) -> Option<&str> {
-        self.shared.content_types.content_type_of(name)
+        self.content_types().content_type_of(name)
     }
 
     /// The decompressed bytes of a part, cached for the life of this package.

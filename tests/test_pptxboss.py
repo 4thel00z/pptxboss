@@ -142,3 +142,13 @@ def test_check_finds_a_missing_part(three_slides_pptx: Path, tmp_path: Path) -> 
     assert first.clause.startswith("Part ")
     assert "PML003" in str(next(f for f in findings if f.code == "PML003"))
     assert pptxboss.check(broken, max_findings=1) != [] and len(pptxboss.check(broken, max_findings=1)) == 1
+
+
+def test_threads_cap_gives_the_same_text(three_slides_pptx: Path) -> None:
+    every_core = pptxboss.Document(three_slides_pptx)
+    one = pptxboss.Document(three_slides_pptx, threads=1)
+    assert every_core.threads == 0
+    assert one.threads == 1
+    assert one.text() == every_core.text()
+    assert one.slide_texts() == every_core.slide_texts()
+    assert [s.title for s in one.slides()] == [s.title for s in every_core.slides()]

@@ -50,7 +50,8 @@ for warning in report.warnings() {
 ```
 
 `Document::map_slides` runs a closure over every slide across the available
-cores; `slide_texts` and `text_reporting` are built on it.
+cores, or across the cap set with `Document::with_threads`; `slide_texts`
+and `text_reporting` are built on it.
 
 ## Lenient semantics and reporting
 

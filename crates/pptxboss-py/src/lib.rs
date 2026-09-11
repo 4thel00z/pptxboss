@@ -70,16 +70,27 @@ impl Document {
 
 #[pymethods]
 impl Document {
-    /// Opens a deck from a path, or from bytes with `data=`.
+    /// Opens a deck from a path, or from bytes with `data=`. `threads` caps
+    /// the workers used by whole-deck calls; None or 0 means every core.
     #[new]
-    #[pyo3(signature = (path=None, *, data=None))]
-    fn new(py: Python<'_>, path: Option<PathBuf>, data: Option<Vec<u8>>) -> PyResult<Self> {
+    #[pyo3(signature = (path=None, *, data=None, threads=None))]
+    fn new(
+        py: Python<'_>,
+        path: Option<PathBuf>,
+        data: Option<Vec<u8>>,
+        threads: Option<usize>,
+    ) -> PyResult<Self> {
+        let threads = threads.unwrap_or(0);
         let opened = match (path.as_ref(), data) {
             (Some(path), None) => py.allow_threads(|| {
-                CoreDocument::open(path).map(|doc| (doc.seed(), doc.slide_count()))
+                CoreDocument::open(path)
+                    .map(|doc| doc.with_threads(threads))
+                    .map(|doc| (doc.seed(), doc.slide_count()))
             }),
             (None, Some(data)) => py.allow_threads(|| {
-                CoreDocument::load(data).map(|doc| (doc.seed(), doc.slide_count()))
+                CoreDocument::load(data)
+                    .map(|doc| doc.with_threads(threads))
+                    .map(|doc| (doc.seed(), doc.slide_count()))
             }),
             _ => {
                 return Err(PyValueError::new_err(
@@ -99,6 +110,12 @@ impl Document {
     #[getter]
     fn slide_count(&self) -> usize {
         self.slide_count
+    }
+
+    /// The worker cap for whole-deck calls; 0 means every core.
+    #[getter]
+    fn threads(&self) -> usize {
+        self.seed.threads()
     }
 
     #[getter]

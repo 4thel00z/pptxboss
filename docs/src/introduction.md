@@ -3,10 +3,10 @@
 pptxboss reads, verifies and creates PowerPoint `.pptx` files. It is a
 clean-room implementation of ECMA-376 (Office Open XML) in safe Rust: the
 ZIP container, the CRC-32, the XML tokenizer, the Open Packaging
-Conventions and the PresentationML model are all written from the
-specification, with a pure-Rust inflate as the only compression
-dependency. One core sits behind the command line, the Rust crates and the
-Python extension.
+Conventions, the DEFLATE decoder and the PresentationML model are all
+written from the specification; the reader has no compression dependency.
+One core sits behind the command line, the Rust crates and the Python
+extension.
 
 ## Leniency
 

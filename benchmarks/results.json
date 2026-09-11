@@ -13,6 +13,7 @@
   },
   "versions": {
     "pptxboss": "0.1.0",
+    "pptxboss-1t": "0.1.0",
     "office-oxide": "0.1.10",
     "kreuzberg": "4.10.3",
     "undoc": "0.10.0",
@@ -427,40 +428,46 @@
   ],
   "engines": {
     "pptxboss": {
-      "total_seconds": 0.6757849153946154,
+      "total_seconds": 0.562879009230528,
       "files": 631,
-      "slides_per_second": 2027.2722411982327,
-      "files_per_second": 933.729039559186
+      "slides_per_second": 2433.9155973729235,
+      "files_per_second": 1121.0224393739525
+    },
+    "pptxboss-1t": {
+      "total_seconds": 0.5940088905917946,
+      "files": 631,
+      "slides_per_second": 2306.3627863130246,
+      "files_per_second": 1062.2736628930793
     },
     "office-oxide": {
-      "total_seconds": 1.6620360640517902,
+      "total_seconds": 1.7902544092794415,
       "files": 631,
-      "slides_per_second": 824.2901761470501,
-      "files_per_second": 379.65481835678
+      "slides_per_second": 765.2543643511598,
+      "files_per_second": 352.46387146392834
     },
     "undoc": {
-      "total_seconds": 2.4574139504984487,
+      "total_seconds": 3.0562433446466457,
       "files": 631,
-      "slides_per_second": 557.496631661148,
-      "files_per_second": 256.7739960424703
+      "slides_per_second": 448.2627348374302,
+      "files_per_second": 206.4626172864368
     },
     "kreuzberg": {
-      "total_seconds": 3.4541049231484067,
+      "total_seconds": 3.8347171299683396,
       "files": 631,
-      "slides_per_second": 396.62952645666854,
-      "files_per_second": 182.68119065266995
+      "slides_per_second": 357.2623360647493,
+      "files_per_second": 164.5492949320123
     },
     "python-pptx": {
-      "total_seconds": 11.364912130957237,
+      "total_seconds": 15.379154471942456,
       "files": 631,
-      "slides_per_second": 120.5464665466453,
-      "files_per_second": 55.52176670871036
+      "slides_per_second": 89.08162035171775,
+      "files_per_second": 41.02956382622912
     },
     "markitdown": {
-      "total_seconds": 95.7636043378152,
+      "total_seconds": 121.11221271654358,
       "files": 631,
-      "slides_per_second": 14.306061363012143,
-      "files_per_second": 6.5891421314311405
+      "slides_per_second": 11.311823715139356,
+      "files_per_second": 5.210044353469295
     }
   }
 }

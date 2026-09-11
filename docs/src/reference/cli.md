@@ -5,6 +5,11 @@ errors as `error:` lines. Exit code 1 means the input could not be read,
 2 means bad usage, except for `check`, which uses 1 for findings at error
 severity and 2 for an unreadable file.
 
+`--threads N`, before or after the subcommand, caps the worker threads
+used to parse slides; the default is every core, or the value of
+`PPTXBOSS_THREADS` when that is set. `--threads 1` keeps everything on the
+calling thread.
+
 ## `pptxboss info FILE [--json]`
 
 Slide count, presentation part, slide size in EMU and inches with its
