@@ -23,6 +23,12 @@ Engines: pptxboss, office-oxide, undoc, kreuzberg, python-pptx,
 markitdown. pptxboss spreads slides across cores; the others run one
 thread per file.
 
+Last run (2026-09-11, Apple M3 Pro, `--repeat 3`, 737 files, 636 gated,
+631 common, 1,370 slides): pptxboss 933.7 files/s; office-oxide 379.7;
+undoc 256.8; kreuzberg 182.7; python-pptx 55.5; markitdown 6.6. No file
+was excluded for a paragraph disagreement; `results.json` lists every
+exclusion with its reason.
+
 ## Corpus
 
 `corpora/fetch_public.sh DEST` fetches the `.pptx` test files of the

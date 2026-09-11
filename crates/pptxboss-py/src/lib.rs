@@ -24,7 +24,9 @@ create_exception!(
     "Raised for any PowerPoint processing error (bad data, unreadable parts, I/O)."
 );
 
-fn pptx_err(err: impl std::fmt::Display) -> PyErr {
+mod write;
+
+pub(crate) fn pptx_err(err: impl std::fmt::Display) -> PyErr {
     PptxError::new_err(err.to_string())
 }
 
@@ -776,5 +778,6 @@ fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Rule>()?;
     m.add_function(wrap_pyfunction!(check, m)?)?;
     m.add_function(wrap_pyfunction!(rules, m)?)?;
+    write::register(m)?;
     Ok(())
 }

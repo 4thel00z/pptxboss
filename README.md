@@ -44,9 +44,12 @@ refusing, reporting every skip.
   finding carries a stable code, a severity and the clause it enforces.
   Real PowerPoint output verifies clean; the rules were calibrated against
   790 public test decks.
-- **Fastest measured**: about 2.7x the throughput of the next fastest
-  library from Python, with paragraph-for-paragraph agreement on the
-  extracted text ([benchmarks](#benchmarks)).
+- **Fastest measured**: 934 files/s extracting text over a 631-file
+  public corpus, about 2.5x the next fastest Rust engine and 17x
+  python-pptx, with paragraph-for-paragraph agreement on every gated file
+  ([benchmarks](#benchmarks)).
+- **Reads Strict decks**: the Open XML SDK's Strict-namespace test decks,
+  which python-pptx cannot open, read and verify like any other.
 
 ## Install
 
@@ -134,24 +137,50 @@ through `pptxboss-core`, and passes `pptxboss check` with no findings.
 
 ## Benchmarks
 
-Text extraction from Python, two real-world PowerPoint decks (7 and 43
-slides, 3 MB and 42 MB), best of 5 per file, warm cache, Apple M3 Pro. A
-file counts only when every engine handles it and the per-slide paragraphs
-agree with python-pptx after whitespace normalization; both files pass.
+**pptxboss is the fastest library measured, about 2.5x the next fastest
+Rust engine and 17x python-pptx, with paragraph-for-paragraph agreement on
+every file that passes the gate.**
 
-| Library | slides/s | files/s |
+Text extraction from Python over the 737 `.pptx` files of the LibreOffice,
+Apache POI, python-pptx, pandoc and Open XML SDK test suites, best of 3 per
+file after a warm-up pass, aggregated over the 631 files every engine
+handled, Apple M3 Pro. A file counts only when pptxboss reports nothing
+skipped and its per-slide paragraphs match python-pptx after whitespace
+normalization: 636 files pass, and not one is excluded for a disagreement.
+The 101 exclusions are 86 Strict-namespace decks python-pptx cannot open,
+11 fuzzer-minimized archives, one encrypted deck, and two fuzzer cases
+pptxboss reports as unreadable.
+
+| Library | files/s | slides/s |
 |---|--:|--:|
-| pptxboss | 2,473 | 98.9 |
-| office-oxide | 909 | 36.3 |
-| undoc | 180 | 7.2 |
-| python-pptx | 136 | 5.4 |
-| kreuzberg | 94 | 3.7 |
-| markitdown | 32 | 1.3 |
+| pptxboss | 933.7 | 2,027 |
+| office-oxide | 379.7 | 824 |
+| undoc | 256.8 | 558 |
+| kreuzberg | 182.7 | 397 |
+| python-pptx | 55.5 | 121 |
+| markitdown | 6.6 | 14 |
 
-pptxboss spreads slides across cores; the other Rust engines run one
-thread per file. In-process, the 43-slide deck opens in 1.8 ms and yields
-its text in 12 ms on one thread and 5.8 ms on twelve. Numbers are
-machine-dependent; reproduce with [`benchmarks/bench.py`](benchmarks/README.md).
+<details>
+<summary>Method and fine print</summary>
+
+Every engine is called from Python through its own adapter. pptxboss
+spreads a deck's slides across cores; the other Rust engines run one
+thread per file, which is how they ship. The test-suite corpus is small
+files, so the row is dominated by per-file overhead: opening the archive,
+finding the presentation, parsing a few slides. On two real-world
+PowerPoint decks (7 and 43 slides, 3 MB and 42 MB) the same harness gives
+2,473 slides/s for pptxboss against 909 for office-oxide. In-process, the
+43-slide deck opens in 1.25 ms with positioned reads (7 ms when the whole
+file is read first), tokenizes its 443 KiB of slide XML in 3.5 ms, and
+yields its text in 10 ms on one thread and 4.5 ms on twelve.
+
+The gate compares pptxboss against python-pptx only, because the other
+engines do not expose per-slide paragraphs. Numbers are machine-dependent;
+reproduce with [`benchmarks/bench.py`](benchmarks/README.md) after
+`benchmarks/corpora/fetch_public.sh`. Engine versions are recorded in
+`benchmarks/results.json`.
+
+</details>
 
 ## What's inside
 

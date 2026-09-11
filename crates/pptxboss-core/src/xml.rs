@@ -286,6 +286,9 @@ struct Scope<'a> {
     ns: Ns,
 }
 
+/// The innermost namespace bound to a prefix: the prefix bytes and the namespace.
+type Binding<'a> = Option<(&'a [u8], Ns)>;
+
 /// An element on the open stack: its resolved name and the name bytes as written.
 #[derive(Clone, Copy)]
 struct Open<'a> {
@@ -301,7 +304,7 @@ pub struct Reader<'a> {
     scopes: Vec<Scope<'a>>,
     /// The innermost binding for each prefix first byte; the common case
     /// resolves with one table lookup and one short compare.
-    first_byte: Box<[Option<(&'a [u8], Ns)>; 256]>,
+    first_byte: Box<[Binding<'a>; 256]>,
     default_ns: Ns,
     pending_end: Option<Name<'a>>,
     other: Vec<&'a [u8]>,

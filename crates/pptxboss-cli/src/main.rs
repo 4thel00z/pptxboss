@@ -10,6 +10,7 @@ use pptxboss_core::{Document, TextOptions};
 mod check;
 mod create;
 mod info;
+mod skill;
 mod text;
 
 #[derive(Parser)]
@@ -80,6 +81,9 @@ enum Command {
     /// Create a deck: blank slides, one slide from arguments, or slides from Markdown.
     #[command(subcommand)]
     Create(create::Create),
+    /// Print or install the bundled agent skill.
+    #[command(subcommand)]
+    Skill(skill::Skill),
 }
 
 /// A failure with the exit code it maps to: 1 for unreadable input, 2 for bad usage.
@@ -137,6 +141,7 @@ fn main() -> ExitCode {
         } => check::run(&file, json, quiet, max_findings, no_crc),
         Command::Rules { json } => check::list_rules(json),
         Command::Create(command) => create::run(command),
+        Command::Skill(command) => skill::run(command),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

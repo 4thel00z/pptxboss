@@ -15,4 +15,5 @@ crate-type = ["cdylib"]
 [dependencies]
 pptxboss-core = { path = "../pptxboss-core" }
 pptxboss-check = { path = "../pptxboss-check" }
+pptxboss-write = { path = "../pptxboss-write" }
 pyo3 = { version = "0.25", features = ["abi3-py312"] }

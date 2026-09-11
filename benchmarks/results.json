@@ -1,0 +1,466 @@
+{
+  "corpus": "pptx",
+  "files": 737,
+  "gated": 636,
+  "common": 631,
+  "slides": 1370,
+  "repeat": 3,
+  "machine": {
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.10",
+    "cpus": 12
+  },
+  "versions": {
+    "pptxboss": "0.1.0",
+    "office-oxide": "0.1.10",
+    "kreuzberg": "4.10.3",
+    "undoc": "0.10.0",
+    "python-pptx": "1.0.2",
+    "markitdown": "0.1.7"
+  },
+  "excluded": [
+    {
+      "file": "libreoffice__bnc591147.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "libreoffice__ofz35597-1.pptx",
+      "reason": "report: slide 1: unreadable: xml in /ppt/slides/slide1.xml at byte 805: end tag does not match the open element"
+    },
+    {
+      "file": "libreoffice__ofz46160-1.pptx",
+      "reason": "report: slide 1: unreadable: inflate: truncated deflate stream"
+    },
+    {
+      "file": "libreoffice__tdf119087.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "libreoffice__tdf148478_transitionMusic.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__2D Area-O12-PPT-Charts.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__3D Pie-O12-PPT-Charts.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__4.6.10 bg.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__5.9.3.7(unfinished).pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__Accent1sysClr.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__Algn_tab_TabAlignment.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__Photo Album3.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]animclr-Direction-cw.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]bg-Background-bwmode-white.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]clrMap-ColorMap-accent1-accent3.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]cmedianode-CommonMediaNodProperties.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]gridSpacing-GidSpacing-cy-0.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]grpsppr-GroupShapeProperties-bwmode-ltgray.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]notes-Notes-showMasterPhAnim.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]restoredLeft-NormalViewRestoredTop-sz-100000.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]sndtgt-SoundTarget-builtIn.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]tavlst-Time-tav-tm.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]val-Boolean Varient-boolVal.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__[HC]viewPr-PresentationViewProperties-showComments-1.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnDist_mainLvl2ppr_AlignmentLevel2Distributed.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnDist_mainLvl5ppr_AlignmentLevel5Distributed.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnJustLow_mainLvl1ppr_AlignmentLevel1JustifiedLow.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnJustLow_mainLvl4ppr_AlignmentLevel4JustifiedLow.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnJust_mainLvl1ppr_AlignmentLevel1Justified.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnJust_mainLvl4ppr_AlignmentLevel4Justified.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnR_mainLvl2ppr_AlignmentLevel2Right.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnR_mainLvl5ppr_AlignmentLevel5Right.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnThaiDist_mainLvl2ppr_AlignmentLevel2ThaiDistributed.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__algnThaiDist_mainLvl5ppr_AlignmentLevel5ThaiDistributed.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__altLang_mainEndParaRpr_AlternateLanguage.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__anchorModified.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__audioCdModifiedAndReSaved.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__bg-Background-bwmode-invgray.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__bldlst-Build Graphics-bldgraphic-uiexpand.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__browse-BrowseSlideShowMode-showScrollBar-0.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__cmpdThickThin_mainUln_UnderlineStrokeCompoundLineTypeThickThin.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__dbl_endParaRprU_EndofParagraphUnderlineDouble.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__encrypted_pptx.pptx",
+      "reason": "pptxboss failed: PptxError: compound file container: encrypted package or legacy binary presentation"
+    },
+    {
+      "file": "openxml-sdk__err_mainEndParaRpr_SpellingError.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__fontAlgnB_mainLvl1ppr_FontAlignmentLevel1Bottom.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__fontAlgnCtr_mainLvl1ppr_FontAlignmentLevel1Center.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__fontAlgnT_mainLvl1ppr_FontAlignementLevel1Top.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__fontScale100000_mainNormAutofit_FontScaleMaximum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__indent-51206400_mainLvl2ppr_IndentLevel2Minimum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__indent51206400_mainLvl1ppr_IndentLevel1Maximum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__kern0_mainEndParaRpr_KerningMinimum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__lvl0_mainLvl3prr_Level0.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__lvl8_mainLvl4prr_Level8.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_bodyPr_anchor_dist.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_bodyPr_rtlCol.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_buautonum_type_alphaLcPeriod.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_buautonum_type_arabicPeriod.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_buautonum_type_ea1jpnkorperiod.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_buautonum_type_romanUCParenBoth.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_bufont_panose_10.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_cs_panose.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_defppr_ealnbrk.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_defppr_indent_51206400.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_defppr_marR.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_ppr_algn_dist.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_ppr_fontalgn_t.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_rpr_strike_dblstrike.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_rpr_u_dotdash.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__main_rpr_u_wavydbl.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__marL0_mainLvl8ppr_MarginLeftMinimum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__marL51206400_mainPpr_LeftMarginMaximum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__marR51206400_mainLvl2ppr_MarginRightLevel2Maximum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__none_endParaRprU_EndOfParagraphUnderlineNone.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__normAutoFit_mainbodyPr_NoAutoFit.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__presentation-Zoom of the embedded OLE Object-Server Zoom.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__rIns_bodyPr_RightMargin.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__sldsz-Slide Size-type-b4iso.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__sldsz-Slide Size-type-screen16x9.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__spc-400000_rPr_CharacterSpacingMinimum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__strikeNoStrike_mainDefRPr_StrikethroughDefaultNoStrike.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__typeface_mainSym_TypeFaceOfFont.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__uDbl_rprU_UnderlineDouble.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__uDottedHeavy_rprU_UnderlineDottedHeavy.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__uWavy_rprU_UnderlineWavy.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__ulnW20116800_main_UnderlineStrokeLineWidthMaximum.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__vertOverflowEllipsis_bodyPrVertOverflow_VertOverflowEllipsis.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__webPr-WebProperties-ImageTargetResolution-imgsz-1024x786.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__webPr-WebProperties-NavigationControl-clr-blackTextOnWhite.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "openxml-sdk__wrapEAvert_bodyPrVert_VerticalTextEAvert.pptx",
+      "reason": "python-pptx failed: KeyError"
+    },
+    {
+      "file": "poi__Divino_Revelado.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIFuzzer-5205835528404992.pptx",
+      "reason": "pptxboss failed: PptxError: not a presentation package"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-4838644450394112.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-4986044400861184.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-5463285576892416.pptx",
+      "reason": "python-pptx failed: BadZipFile"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-5471515212382208.pptx",
+      "reason": "python-pptx failed: BadZipFile"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-5611274456596480.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6071540680032256.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6254434927378432.pptx",
+      "reason": "python-pptx failed: PackageNotFoundError"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6372932378820608.pptx",
+      "reason": "python-pptx failed: BadZipFile"
+    },
+    {
+      "file": "poi__clusterfuzz-testcase-minimized-POIXSLFFuzzer-6435650376957952.pptx",
+      "reason": "python-pptx failed: BadZipFile"
+    },
+    {
+      "file": "poi__crash-57308ca363f5b71763c489d1b432aff009d4bc4f.pptx",
+      "reason": "python-pptx failed: BadZipFile"
+    }
+  ],
+  "engines": {
+    "pptxboss": {
+      "total_seconds": 0.6757849153946154,
+      "files": 631,
+      "slides_per_second": 2027.2722411982327,
+      "files_per_second": 933.729039559186
+    },
+    "office-oxide": {
+      "total_seconds": 1.6620360640517902,
+      "files": 631,
+      "slides_per_second": 824.2901761470501,
+      "files_per_second": 379.65481835678
+    },
+    "undoc": {
+      "total_seconds": 2.4574139504984487,
+      "files": 631,
+      "slides_per_second": 557.496631661148,
+      "files_per_second": 256.7739960424703
+    },
+    "kreuzberg": {
+      "total_seconds": 3.4541049231484067,
+      "files": 631,
+      "slides_per_second": 396.62952645666854,
+      "files_per_second": 182.68119065266995
+    },
+    "python-pptx": {
+      "total_seconds": 11.364912130957237,
+      "files": 631,
+      "slides_per_second": 120.5464665466453,
+      "files_per_second": 55.52176670871036
+    },
+    "markitdown": {
+      "total_seconds": 95.7636043378152,
+      "files": 631,
+      "slides_per_second": 14.306061363012143,
+      "files_per_second": 6.5891421314311405
+    }
+  }
+}
