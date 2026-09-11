@@ -3,8 +3,11 @@
 from pptxboss import write
 from pptxboss._pptxboss import (
     AppProperties,
+    Chart,
+    ChartSeries,
     Comment,
     CoreProperties,
+    Diagram,
     Document,
     EmbeddedObject,
     Finding,
@@ -22,8 +25,11 @@ from pptxboss._pptxboss import (
 
 __all__ = [
     "AppProperties",
+    "Chart",
+    "ChartSeries",
     "Comment",
     "CoreProperties",
+    "Diagram",
     "Document",
     "EmbeddedObject",
     "Finding",

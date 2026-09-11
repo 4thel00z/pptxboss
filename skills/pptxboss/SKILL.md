@@ -29,6 +29,8 @@ pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}]
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number placeholders
 pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
+pptxboss text --no-charts --no-diagrams deck.pptx   # slide text without chart data or SmartArt
+pptxboss markdown --notes deck.pptx     # the deck as Markdown: headings, bullets, tables, images, charts
 pptxboss text --threads 1 deck.pptx     # cap worker threads (default: every core)
 pptxboss check deck.pptx                # exit 0 clean, 1 errors, 2 unreadable
 pptxboss check --json --quiet deck.pptx
@@ -40,8 +42,9 @@ pptxboss create blank out.pptx --slides 3 --standard
 
 Text semantics: shapes in z-order, one paragraph per line, line breaks
 kept, fields included, table rows one per line with tab-separated cells,
-groups descended. Hidden shapes and date/footer/slide-number placeholders
-are left out unless asked. Text is never inherited from layouts or masters.
+groups descended, chart title and data as rows, diagram nodes one per
+line. Hidden shapes and date/footer/slide-number placeholders are left out
+unless asked. Text is never inherited from layouts or masters.
 
 Markdown for `create md`: `#` starts a title slide and the next paragraph
 is its subtitle; `##` or `###` starts a content slide; `-`, `*`, `+`, `1.`
@@ -61,6 +64,9 @@ for slide in doc:                              # lazy, parsed on demand
     slide.paragraphs()                         # every non-empty paragraph incl. table cells
     slide.notes()                              # speaker notes or None
     slide.comments()                           # Comment(author, initials, date, text, reply)
+    slide.charts()                             # Chart(title, kinds, series=[ChartSeries(name, categories, values)])
+    slide.diagrams()                           # Diagram(items=[(level, text), ...])
+    slide.markdown(notes=True)                 # this slide as Markdown
     slide.embedded_objects()                   # EmbeddedObject(prog_id, part, ...); slide.object_bytes(obj)
     slide.tables()                             # list of rows of cell texts
     for shape in slide.shapes():               # kind: text|picture|table|group|chart|diagram|ole|...
@@ -73,6 +79,7 @@ doc.titles()
 doc.core_properties(); doc.app_properties()    # docProps metadata or None
 doc.sections()                                 # Section(name, slides) with zero-based indexes
 doc.text(notes=True, comments=True, alt_text=True)  # whole deck, blank line between slides
+doc.markdown(notes=True, comments=True)        # whole deck as Markdown, slides separated by ---
 text, warnings = doc.text_reporting()          # warnings: what the reader skipped
 doc.slide_texts(hidden_slides=False)
 

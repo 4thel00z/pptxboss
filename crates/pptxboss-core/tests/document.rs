@@ -441,3 +441,90 @@ fn embedded_objects_and_alt_text_are_exposed() {
     assert_eq!(text, "Objects\nBudget sheet\nA red square");
     let _ = R;
 }
+
+const CHART_XML: &str = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>Revenue</a:t></a:r></a:p></c:rich></c:tx></c:title><c:plotArea><c:barChart><c:ser><c:idx val="0"/><c:tx><c:v>2024</c:v></c:tx><c:cat><c:strLit><c:pt idx="0"><c:v>Q1</c:v></c:pt><c:pt idx="1"><c:v>Q2</c:v></c:pt></c:strLit></c:cat><c:val><c:numLit><c:pt idx="0"><c:v>10</c:v></c:pt><c:pt idx="1"><c:v>12</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#;
+const DIAGRAM_XML: &str = r#"<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst><dgm:pt modelId="{D0}" type="doc"><dgm:t><a:bodyPr/><a:p/></dgm:t></dgm:pt><dgm:pt modelId="{N1}"><dgm:t><a:bodyPr/><a:p><a:r><a:t>Plan</a:t></a:r></a:p></dgm:t></dgm:pt><dgm:pt modelId="{N2}"><dgm:t><a:bodyPr/><a:p><a:r><a:t>Build</a:t></a:r></a:p></dgm:t></dgm:pt><dgm:pt modelId="{N3}"><dgm:t><a:bodyPr/><a:p><a:r><a:t>Test first</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:cxnLst><dgm:cxn modelId="{C1}" srcId="{D0}" destId="{N1}" srcOrd="0" destOrd="0"/><dgm:cxn modelId="{C2}" srcId="{D0}" destId="{N2}" srcOrd="1" destOrd="0"/><dgm:cxn modelId="{C3}" srcId="{N2}" destId="{N3}" srcOrd="0" destOrd="0"/></dgm:cxnLst></dgm:dataModel>"#;
+
+fn figures_deck() -> Deck {
+    let frames = format!(
+        r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="7" name="Chart 6"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId5"/></a:graphicData></a:graphic></p:graphicFrame><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="8" name="Diagram 7"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="rId6" r:lo="rId6" r:qs="rId6" r:cs="rId6"/></a:graphicData></a:graphic></p:graphicFrame>{}"#,
+        ""
+    );
+    Deck::new()
+        .slide(
+            DeckSlide::titled("Figures")
+                .bullet("Intro")
+                .shapes_xml(&frames)
+                .rel("rId5", "chart", "../charts/chart1.xml", false)
+                .rel("rId6", "diagramData", "../diagrams/data1.xml", false),
+        )
+        .with_part("ppt/charts/chart1.xml", CHART_XML.as_bytes())
+        .with_part("ppt/diagrams/data1.xml", DIAGRAM_XML.as_bytes())
+}
+
+#[test]
+fn chart_and_diagram_text_join_the_slide_text() {
+    let doc = Document::load(figures_deck().build()).unwrap();
+    let slide = doc.slide(0).unwrap();
+    let charts = slide.charts().unwrap();
+    assert_eq!(charts.len(), 1);
+    assert_eq!(charts[0].0, 7);
+    assert_eq!(charts[0].1.title.as_deref(), Some("Revenue"));
+    let diagrams = slide.diagrams().unwrap();
+    assert_eq!(diagrams.len(), 1);
+    assert_eq!(diagrams[0].1.items.len(), 3);
+    assert_eq!(diagrams[0].1.items[2].level, 1);
+    assert_eq!(
+        slide.text(),
+        "Figures\nIntro\nRevenue\n\t2024\nQ1\t10\nQ2\t12\nPlan\nBuild\nTest first"
+    );
+    let (text, report) = doc.text_reporting(&TextOptions {
+        charts: false,
+        diagrams: false,
+        ..TextOptions::default()
+    });
+    assert!(report.is_complete());
+    assert_eq!(text, "Figures\nIntro");
+    let broken = Document::load(
+        figures_deck()
+            .with_part("ppt/charts/chart1.xml", b"<c:chartSpace")
+            .build(),
+    )
+    .unwrap();
+    let (text, report) = broken.text_reporting(&TextOptions::default());
+    assert_eq!(report.failed_frames.len(), 1);
+    assert!(text.starts_with("Figures\nIntro\nPlan"));
+}
+
+#[test]
+fn markdown_renders_headings_bullets_tables_images_charts_and_notes() {
+    let table = r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="5" name="Table 4"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="1"/><a:gridCol w="1"/></a:tblGrid><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Name</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Va|ue</a:t></a:r></a:p></a:txBody></a:tc></a:tr><a:tr h="1"><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>Answer</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:bodyPr/><a:p><a:r><a:t>42</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>"#;
+    let picture = r#"<p:pic><p:nvPicPr><p:cNvPr id="6" name="Picture 5" descr="A red square"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId3"/></p:blipFill><p:spPr/></p:pic>"#;
+    let text_box = format!(
+        r#"<p:sp><p:nvSpPr><p:cNvPr id="9" name="TextBox 8"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:rPr lang="en-US" b="1"/><a:t>Bold</a:t></a:r><a:r><a:rPr lang="en-US"/><a:t> and a </a:t></a:r><a:r><a:rPr lang="en-US"><a:hlinkClick r:id="rId4"/></a:rPr><a:t>link</a:t></a:r></a:p><a:p><a:pPr lvl="1"><a:buChar char="&#8226;"/></a:pPr><a:r><a:t>nested bullet</a:t></a:r></a:p></p:txBody></p:sp>{}"#,
+        ""
+    );
+    let deck = figures_deck()
+        .slide(
+            DeckSlide::titled("Second: details")
+                .bullet("Alpha")
+                .bullet("Beta")
+                .shapes_xml(&format!("{table}{picture}{text_box}"))
+                .rel("rId3", "image", "../media/image1.png", false)
+                .rel("rId4", "hyperlink", "https://example.com/a b", true)
+                .notes("Say hello"),
+        )
+        .slide(DeckSlide::titled("Hidden").bullet("secret").hidden())
+        .media("image1.png", PNG, "image/png");
+    let doc = Document::load(deck.build()).unwrap();
+    let options = pptxboss_core::MarkdownOptions {
+        notes: true,
+        hidden_slides: false,
+        ..Default::default()
+    };
+    let (markdown, report) = doc.markdown(&options);
+    assert!(report.is_complete(), "{:?}", report.warnings());
+    assert_eq!(report.hidden_slides_skipped, 1);
+    let expected = "## Figures\n\n- Intro\n\n**Chart: Revenue**\n\n|  | 2024 |\n|---|---|\n| Q1 | 10 |\n| Q2 | 12 |\n\n- Plan\n- Build\n  - Test first\n\n---\n\n## Second: details\n\n- Alpha\n- Beta\n\n| Name | Va\\|ue |\n|---|---|\n| Answer | 42 |\n\n![A red square](ppt/media/image1.png)\n\n**Bold** and a [link](https://example.com/a%20b)\n\n  - nested bullet\n\n> **Notes:**\n> Say hello\n";
+    assert_eq!(markdown, expected);
+}

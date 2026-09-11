@@ -54,6 +54,8 @@ pub enum Ns {
     Vt,
     /// DrawingML charts.
     Chart,
+    /// The 2014 extended charts (`cx:`).
+    ChartEx,
     /// DrawingML diagrams.
     Dgm,
     /// DrawingML pictures.
@@ -199,6 +201,11 @@ const KNOWN: &[(&[u8], Ns, Conformance)] = &[
     (
         b"http://schemas.microsoft.com/office/powerpoint/2010/main",
         Ns::P14,
+        Conformance::Transitional,
+    ),
+    (
+        b"http://schemas.microsoft.com/office/drawing/2014/chartex",
+        Ns::ChartEx,
         Conformance::Transitional,
     ),
     (

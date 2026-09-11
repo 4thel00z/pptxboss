@@ -363,7 +363,7 @@ fn parse_graphic_data<'a>(
     children(reader, &mut |reader, child| {
         let parsed = match (child.name.ns, child.name.local) {
             (Ns::Dml, b"tbl") => Some(Content::Table(parse_table(reader)?)),
-            (Ns::Chart, b"chart") => Some(Content::Chart(
+            (Ns::Chart, b"chart") | (Ns::ChartEx, b"chart") => Some(Content::Chart(
                 reader.attr(&child, Ns::Rel, b"id").map(unescape_attr),
             )),
             (Ns::Dgm, b"relIds") => Some(Content::Diagram(

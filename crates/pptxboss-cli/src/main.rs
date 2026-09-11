@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use pptxboss_core::{Document, TextOptions};
+use pptxboss_core::{Document, MarkdownOptions, TextOptions};
 
 mod check;
 mod create;
 mod info;
+mod markdown;
 mod skill;
 mod text;
 
@@ -57,12 +58,43 @@ enum Command {
         /// Append each slide's comments after its text and notes.
         #[arg(long)]
         comments: bool,
+        /// Leave out chart titles, series and values.
+        #[arg(long)]
+        no_charts: bool,
+        /// Leave out the text of diagrams (SmartArt).
+        #[arg(long)]
+        no_diagrams: bool,
         /// Print a `--- slide N ---` heading before each slide.
         #[arg(long)]
         headings: bool,
         /// Emit one JSON object per slide instead of text.
         #[arg(long)]
         json: bool,
+    },
+    /// Render the deck as Markdown: a heading per slide, bullets, tables, images, charts and diagrams.
+    Markdown {
+        file: PathBuf,
+        /// Speaker notes as a block quote after each slide.
+        #[arg(long)]
+        notes: bool,
+        /// Comments as block quotes after each slide.
+        #[arg(long)]
+        comments: bool,
+        /// Leave out slides marked hidden.
+        #[arg(long)]
+        skip_hidden: bool,
+        /// Include shapes marked hidden.
+        #[arg(long)]
+        hidden_shapes: bool,
+        /// Include date, footer, header and slide number placeholders.
+        #[arg(long)]
+        furniture: bool,
+        /// No `## Title` heading per slide.
+        #[arg(long)]
+        no_headings: bool,
+        /// Leave images out.
+        #[arg(long)]
+        no_images: bool,
     },
     /// Verify a deck against ECMA-376: container, package, relationships and PresentationML structure.
     ///
@@ -134,6 +166,8 @@ fn main() -> ExitCode {
             skip_hidden,
             alt_text,
             comments,
+            no_charts,
+            no_diagrams,
             headings,
             json,
         } => {
@@ -144,9 +178,32 @@ fn main() -> ExitCode {
                 hidden_slides: !skip_hidden,
                 alt_text,
                 comments,
+                charts: !no_charts,
+                diagrams: !no_diagrams,
                 ..TextOptions::default()
             };
             open(&file, threads).and_then(|doc| text::run(&doc, &options, headings, json))
+        }
+        Command::Markdown {
+            file,
+            notes,
+            comments,
+            skip_hidden,
+            hidden_shapes,
+            furniture,
+            no_headings,
+            no_images,
+        } => {
+            let options = MarkdownOptions {
+                headings: !no_headings,
+                notes,
+                comments,
+                hidden_slides: !skip_hidden,
+                hidden_shapes,
+                furniture,
+                images: !no_images,
+            };
+            open(&file, threads).and_then(|doc| markdown::run(&doc, &options))
         }
         Command::Check {
             file,

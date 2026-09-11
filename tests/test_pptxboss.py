@@ -181,3 +181,22 @@ def test_properties_sections_comments_and_objects(features_pptx: Path) -> None:
     assert "[comment] Ada Lovelace: Tighten this point" in text
     assert "Budget sheet" in text
     assert "[comment]" not in doc.text()
+
+
+def test_charts_diagrams_and_markdown(features_pptx: Path) -> None:
+    doc = pptxboss.Document(features_pptx)
+    slide = doc[3]
+    charts = slide.charts()
+    assert len(charts) == 1 and charts[0].title == "Revenue" and charts[0].kinds == ["barChart"]
+    assert charts[0].series[0].name == "2024"
+    assert charts[0].series[0].categories == ["Q1", "Q2"]
+    assert charts[0].series[0].values == ["10", "12"]
+    diagrams = slide.diagrams()
+    assert len(diagrams) == 1 and diagrams[0].items == [(0, "Plan"), (0, "Build"), (1, "Test first")]
+    assert slide.text() == "Figures\nRevenue\n\t2024\nQ1\t10\nQ2\t12\nPlan\nBuild\nTest first"
+    assert slide.text(charts=False, diagrams=False) == "Figures"
+    assert doc.text(charts=False).count("Revenue") == 0
+    markdown = doc.markdown(comments=True)
+    assert markdown.startswith("## Commented\n\n- A point\n\n![A blue diagram](ppt/media/image1.png)")
+    assert "| Q1 | 10 |" in markdown
+    assert slide.markdown().startswith("## Figures\n\n**Chart: Revenue**")

@@ -15,7 +15,9 @@ use pyo3::types::PyBytes;
 
 use pptxboss_core::model::{Content, PlaceholderKind, Shape as CoreShape, SlideContent};
 use pptxboss_core::text::write_content_text;
-use pptxboss_core::{Document as CoreDocument, DocumentSeed, SlideReport, TextOptions};
+use pptxboss_core::{
+    Document as CoreDocument, DocumentSeed, MarkdownOptions, SlideReport, TextOptions,
+};
 
 create_exception!(
     pptxboss,
@@ -30,6 +32,7 @@ pub(crate) fn pptx_err(err: impl std::fmt::Display) -> PyErr {
     PptxError::new_err(err.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn options(
     notes: bool,
     furniture: bool,
@@ -215,7 +218,8 @@ impl Document {
     }
 
     /// The text of the whole deck: slides separated by a blank line.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
         py: Python<'_>,
@@ -225,8 +229,10 @@ impl Document {
         hidden_slides: bool,
         alt_text: bool,
         comments: bool,
+        charts: bool,
+        diagrams: bool,
     ) -> String {
-        let options = options(
+        let mut options = options(
             notes,
             furniture,
             hidden_shapes,
@@ -234,12 +240,15 @@ impl Document {
             alt_text,
             comments,
         );
+        options.charts = charts;
+        options.diagrams = diagrams;
         let seed = self.seed.clone();
         py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options).0)
     }
 
     /// The text plus one warning line per problem the reader skipped.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[allow(clippy::too_many_arguments)]
     fn text_reporting(
         &self,
         py: Python<'_>,
@@ -249,8 +258,10 @@ impl Document {
         hidden_slides: bool,
         alt_text: bool,
         comments: bool,
+        charts: bool,
+        diagrams: bool,
     ) -> (String, Vec<String>) {
-        let options = options(
+        let mut options = options(
             notes,
             furniture,
             hidden_shapes,
@@ -258,6 +269,8 @@ impl Document {
             alt_text,
             comments,
         );
+        options.charts = charts;
+        options.diagrams = diagrams;
         let seed = self.seed.clone();
         let (text, report) =
             py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options));
@@ -265,7 +278,8 @@ impl Document {
     }
 
     /// One string per slide, in order, extracted in parallel.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[allow(clippy::too_many_arguments)]
     fn slide_texts(
         &self,
         py: Python<'_>,
@@ -275,8 +289,10 @@ impl Document {
         hidden_slides: bool,
         alt_text: bool,
         comments: bool,
+        charts: bool,
+        diagrams: bool,
     ) -> Vec<String> {
-        let options = options(
+        let mut options = options(
             notes,
             furniture,
             hidden_shapes,
@@ -284,6 +300,8 @@ impl Document {
             alt_text,
             comments,
         );
+        options.charts = charts;
+        options.diagrams = diagrams;
         let seed = self.seed.clone();
         py.allow_threads(|| CoreDocument::from_seed(seed).slide_texts(&options).0)
     }
@@ -346,6 +364,34 @@ impl Document {
                 slides: section.slides,
             })
             .collect()
+    }
+
+    /// The deck as Markdown: a heading per slide, bullets, tables, images,
+    /// chart tables and diagram outlines; notes and comments as block quotes on request.
+    #[pyo3(signature = (*, headings=true, notes=false, comments=false, hidden_slides=true, hidden_shapes=false, furniture=false, images=true))]
+    #[allow(clippy::too_many_arguments)]
+    fn markdown(
+        &self,
+        py: Python<'_>,
+        headings: bool,
+        notes: bool,
+        comments: bool,
+        hidden_slides: bool,
+        hidden_shapes: bool,
+        furniture: bool,
+        images: bool,
+    ) -> String {
+        let options = markdown_options(
+            headings,
+            notes,
+            comments,
+            hidden_slides,
+            hidden_shapes,
+            furniture,
+            images,
+        );
+        let seed = self.seed.clone();
+        py.allow_threads(|| CoreDocument::from_seed(seed).markdown(&options).0)
     }
 
     /// The title of every slide (None where a slide has no title placeholder).
@@ -485,15 +531,114 @@ impl Slide {
     }
 
     /// The slide's text: shapes in z-order, paragraphs one per line.
-    #[pyo3(signature = (*, furniture=false, hidden_shapes=false, alt_text=false))]
-    fn text(&self, furniture: bool, hidden_shapes: bool, alt_text: bool) -> String {
-        let mut out = String::new();
-        write_content_text(
-            &self.content,
-            &options(false, furniture, hidden_shapes, true, alt_text, false),
-            &mut out,
+    #[pyo3(signature = (*, furniture=false, hidden_shapes=false, alt_text=false, charts=true, diagrams=true))]
+    fn text(
+        &self,
+        py: Python<'_>,
+        furniture: bool,
+        hidden_shapes: bool,
+        alt_text: bool,
+        charts: bool,
+        diagrams: bool,
+    ) -> PyResult<String> {
+        let mut text_options = options(false, furniture, hidden_shapes, true, alt_text, false);
+        text_options.charts = charts;
+        text_options.diagrams = diagrams;
+        if !charts && !diagrams {
+            let mut out = String::new();
+            write_content_text(&self.content, &text_options, &mut |_| None, &mut out);
+            return Ok(out);
+        }
+        let seed = self.seed.clone();
+        let index = self.index;
+        py.allow_threads(|| {
+            let doc = CoreDocument::from_seed(seed);
+            let slide = doc.slide(index)?;
+            let mut report = pptxboss_core::ExtractReport::default();
+            Ok::<_, pptxboss_core::Error>(slide.text_reporting(&text_options, &mut report))
+        })
+        .map_err(pptx_err)
+    }
+
+    /// This slide as Markdown, without a trailing newline.
+    #[pyo3(signature = (*, headings=true, notes=false, comments=false, hidden_shapes=false, furniture=false, images=true))]
+    #[allow(clippy::too_many_arguments)]
+    fn markdown(
+        &self,
+        py: Python<'_>,
+        headings: bool,
+        notes: bool,
+        comments: bool,
+        hidden_shapes: bool,
+        furniture: bool,
+        images: bool,
+    ) -> PyResult<String> {
+        let options = markdown_options(
+            headings,
+            notes,
+            comments,
+            true,
+            hidden_shapes,
+            furniture,
+            images,
         );
-        out
+        let seed = self.seed.clone();
+        let index = self.index;
+        py.allow_threads(|| {
+            let doc = CoreDocument::from_seed(seed);
+            let slide = doc.slide(index)?;
+            let mut report = pptxboss_core::ExtractReport::default();
+            Ok::<_, pptxboss_core::Error>(slide.markdown(&options, &mut report))
+        })
+        .map_err(pptx_err)
+    }
+
+    /// Every chart on the slide, in z-order.
+    fn charts(&self, py: Python<'_>) -> PyResult<Vec<Chart>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        let charts = py
+            .allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.charts())
+            .map_err(pptx_err)?;
+        Ok(charts
+            .into_iter()
+            .map(|(shape_id, chart)| Chart {
+                shape_id,
+                title: chart.title,
+                kinds: chart.kinds,
+                category_axis_title: chart.category_axis_title,
+                value_axis_title: chart.value_axis_title,
+                series: chart
+                    .series
+                    .into_iter()
+                    .map(|series| ChartSeries {
+                        name: series.name,
+                        categories: series.categories,
+                        values: series.values,
+                    })
+                    .collect(),
+            })
+            .collect())
+    }
+
+    /// Every diagram (SmartArt) on the slide, in z-order.
+    fn diagrams(&self, py: Python<'_>) -> PyResult<Vec<Diagram>> {
+        let seed = self.seed.clone();
+        let index = self.index;
+        let diagrams = py
+            .allow_threads(|| CoreDocument::from_seed(seed).slide(index)?.diagrams())
+            .map_err(pptx_err)?;
+        Ok(diagrams
+            .into_iter()
+            .map(|(shape_id, diagram)| Diagram {
+                shape_id,
+                items: diagram
+                    .items
+                    .into_iter()
+                    .map(|item| (item.level, item.text))
+                    .collect(),
+            })
+            .collect())
     }
 
     /// The slide's comments in order, replies after their parent.
@@ -795,6 +940,100 @@ impl Shape {
         format!(
             "Shape(id={}, kind={:?}, name={:?})",
             self.id, self.kind, self.name
+        )
+    }
+}
+
+fn markdown_options(
+    headings: bool,
+    notes: bool,
+    comments: bool,
+    hidden_slides: bool,
+    hidden_shapes: bool,
+    furniture: bool,
+    images: bool,
+) -> MarkdownOptions {
+    MarkdownOptions {
+        headings,
+        notes,
+        comments,
+        hidden_slides,
+        hidden_shapes,
+        furniture,
+        images,
+    }
+}
+
+/// One series of a chart.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct ChartSeries {
+    #[pyo3(get)]
+    name: Option<String>,
+    #[pyo3(get)]
+    categories: Vec<String>,
+    #[pyo3(get)]
+    values: Vec<String>,
+}
+
+#[pymethods]
+impl ChartSeries {
+    fn __repr__(&self) -> String {
+        format!(
+            "ChartSeries(name={:?}, points={})",
+            self.name,
+            self.values.len()
+        )
+    }
+}
+
+/// A chart on a slide: its cached words and numbers.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Chart {
+    #[pyo3(get)]
+    shape_id: u32,
+    #[pyo3(get)]
+    title: Option<String>,
+    #[pyo3(get)]
+    kinds: Vec<String>,
+    #[pyo3(get)]
+    category_axis_title: Option<String>,
+    #[pyo3(get)]
+    value_axis_title: Option<String>,
+    #[pyo3(get)]
+    series: Vec<ChartSeries>,
+}
+
+#[pymethods]
+impl Chart {
+    fn __repr__(&self) -> String {
+        format!(
+            "Chart(title={:?}, kinds={:?}, series={})",
+            self.title,
+            self.kinds,
+            self.series.len()
+        )
+    }
+}
+
+/// A diagram (SmartArt) on a slide: `(level, text)` per node, depth-first.
+#[pyclass(frozen, module = "pptxboss")]
+#[derive(Clone)]
+struct Diagram {
+    #[pyo3(get)]
+    shape_id: u32,
+    #[pyo3(get)]
+    items: Vec<(u8, String)>,
+}
+
+#[pymethods]
+impl Diagram {
+    fn __repr__(&self) -> String {
+        format!(
+            "Diagram(shape_id={}, items={})",
+            self.shape_id,
+            self.items.len()
         )
     }
 }
@@ -1113,6 +1352,9 @@ fn _pptxboss(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Section>()?;
     m.add_class::<Comment>()?;
     m.add_class::<EmbeddedObject>()?;
+    m.add_class::<Chart>()?;
+    m.add_class::<ChartSeries>()?;
+    m.add_class::<Diagram>()?;
     m.add_class::<Finding>()?;
     m.add_class::<Rule>()?;
     m.add_function(wrap_pyfunction!(check, m)?)?;

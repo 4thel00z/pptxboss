@@ -197,3 +197,16 @@ fn text_appends_comments_and_alt_text_on_request() {
     );
     assert!(rich.contains("Embedded\nBudget sheet"), "{rich}");
 }
+
+#[test]
+fn markdown_command_renders_the_deck() {
+    let path = features_fixture();
+    let (code, stdout, stderr) = run(&["markdown", "--comments", path.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stdout.starts_with("## Commented\n\n- A point\n\n![A blue diagram](ppt/media/image1.png)\n\n> **Comment (Ada Lovelace, 2024-05-01T10:00:00.000):** Tighten this point\n\n---\n\n## Embedded\n\n*Budget sheet*"), "{stdout}");
+    assert!(stdout.contains("## Figures\n\n**Chart: Revenue**\n\n|  | 2024 |\n|---|---|\n| Q1 | 10 |\n| Q2 | 12 |\n\n- Plan\n- Build\n  - Test first\n"), "{stdout}");
+    let (code, text, _) = run(&["text", "--no-charts", path.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    assert!(text.contains("Figures\nPlan\nBuild\nTest first"), "{text}");
+    assert!(!text.contains("Revenue"));
+}

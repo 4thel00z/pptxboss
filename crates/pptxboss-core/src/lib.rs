@@ -9,13 +9,16 @@
 //! packages where the structure still allows it and reporting what it
 //! skipped.
 
+pub mod chart;
 pub mod comments;
 pub mod crc32;
+pub mod diagram;
 pub mod document;
 pub mod encoding;
 pub mod error;
 pub mod hash;
 pub mod inflate;
+pub mod markdown;
 pub mod mce;
 pub mod model;
 pub mod opc;
@@ -28,9 +31,12 @@ pub mod text;
 pub mod xml;
 pub mod zip;
 
+pub use chart::{ChartData, Series};
 pub use comments::{Comment, CommentAuthor};
+pub use diagram::{DiagramData, DiagramItem};
 pub use document::{Document, DocumentSeed, ImageRef, ObjectRef, Slide, SlideRef, SlideSection};
 pub use error::{Error, Result};
+pub use markdown::MarkdownOptions;
 pub use model::{Content, Paragraph, Run, Shape, SlideContent, TextBody};
 pub use package::{Package, PackageDefects, PackageSeed, Part};
 pub use presentation::{Presentation, Section};

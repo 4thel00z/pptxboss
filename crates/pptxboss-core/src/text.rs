@@ -18,6 +18,10 @@ pub struct TextOptions {
     pub alt_text: bool,
     /// Include the slide's comments after its text and notes.
     pub comments: bool,
+    /// Include chart titles, series names, categories and values, as table rows.
+    pub charts: bool,
+    /// Include the text of diagrams (SmartArt), one node per line.
+    pub diagrams: bool,
     /// Separator between table cells of one row.
     pub cell_separator: String,
 }
@@ -31,6 +35,8 @@ impl Default for TextOptions {
             notes: false,
             alt_text: false,
             comments: false,
+            charts: true,
+            diagrams: true,
             cell_separator: "\t".to_string(),
         }
     }
@@ -39,8 +45,15 @@ impl Default for TextOptions {
 /// Appends the text of `content` to `out`: shapes in z-order, one shape
 /// per line block, paragraphs separated by newlines, table rows one per
 /// line with cells separated by the configured separator. Shapes without
-/// text contribute nothing. No text is inherited from layouts or masters.
-pub fn write_content_text(content: &SlideContent, options: &TextOptions, out: &mut String) {
+/// text contribute nothing. Graphic frames whose text lives in another
+/// part (charts, diagrams) ask `frames` for it. No text is inherited from
+/// layouts or masters.
+pub fn write_content_text(
+    content: &SlideContent,
+    options: &TextOptions,
+    frames: &mut dyn FnMut(&Shape) -> Option<String>,
+    out: &mut String,
+) {
     let mut first = true;
     for shape in content.walk() {
         if shape.hidden && !options.hidden_shapes {
@@ -56,6 +69,11 @@ pub fn write_content_text(content: &SlideContent, options: &TextOptions, out: &m
         }
         let start = out.len();
         write_shape_text(shape, options, out);
+        if out.len() == start && matches!(shape.content, Content::Chart(_) | Content::Diagram(_)) {
+            if let Some(text) = frames(shape) {
+                out.push_str(&text);
+            }
+        }
         if out.len() == start && options.alt_text {
             write_alt_text(shape, out);
         }
@@ -128,6 +146,8 @@ pub struct ExtractReport {
     pub failed_notes: Vec<(usize, String)>,
     /// Comments parts that could not be read or parsed.
     pub failed_comments: Vec<(usize, String)>,
+    /// Chart or diagram parts that could not be read or parsed.
+    pub failed_frames: Vec<(usize, String)>,
     /// Hidden slides left out because the options excluded them.
     pub hidden_slides_skipped: u32,
     /// Graphic frames whose content type the reader does not understand.
@@ -144,7 +164,26 @@ impl ExtractReport {
         self.failed_slides.is_empty()
             && self.failed_notes.is_empty()
             && self.failed_comments.is_empty()
+            && self.failed_frames.is_empty()
             && self.unknown_graphics == 0
+    }
+
+    /// Folds a per-slide report for slide `index` into this deck-level one.
+    pub fn merge(&mut self, index: usize, other: ExtractReport) {
+        let reindex =
+            |items: Vec<(usize, String)>| items.into_iter().map(move |(_, err)| (index, err));
+        self.failed_slides.extend(reindex(other.failed_slides));
+        self.failed_notes.extend(reindex(other.failed_notes));
+        self.failed_comments.extend(reindex(other.failed_comments));
+        self.failed_frames.extend(reindex(other.failed_frames));
+        self.hidden_slides_skipped += other.hidden_slides_skipped;
+        self.unknown_graphics += other.unknown_graphics;
+        for uri in other.unknown_graphic_uris {
+            if !self.unknown_graphic_uris.contains(&uri) {
+                self.unknown_graphic_uris.push(uri);
+            }
+        }
+        self.unknown_elements += other.unknown_elements;
     }
 
     /// One line per problem, suitable for a warning stream.
@@ -158,6 +197,12 @@ impl ExtractReport {
         }
         for (index, err) in &self.failed_comments {
             lines.push(format!("slide {}: comments unreadable: {err}", index + 1));
+        }
+        for (index, err) in &self.failed_frames {
+            lines.push(format!(
+                "slide {}: chart or diagram unreadable: {err}",
+                index + 1
+            ));
         }
         if self.unknown_graphics > 0 {
             lines.push(format!(
@@ -262,7 +307,7 @@ mod tests {
             ],
         };
         let mut out = String::new();
-        write_content_text(&content, &TextOptions::default(), &mut out);
+        write_content_text(&content, &TextOptions::default(), &mut |_| None, &mut out);
         assert_eq!(out, "Title\nin group\nsecond\na\tb\nc");
         let mut out = String::new();
         write_content_text(
@@ -273,6 +318,7 @@ mod tests {
                 cell_separator: " | ".into(),
                 ..TextOptions::default()
             },
+            &mut |_| None,
             &mut out,
         );
         assert_eq!(out, "Title\n12\nsecret\nin group\nsecond\na | b\nc");

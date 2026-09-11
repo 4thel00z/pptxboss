@@ -71,6 +71,9 @@ struct Shared {
     defects: std::sync::OnceLock<PackageDefects>,
 }
 
+/// A logical item's display name and its pieces as `(number, is last, entry)`.
+type PieceSequence = (String, Vec<(u64, bool, usize)>);
+
 /// The content types stream with what went wrong while reading it.
 #[derive(Default)]
 struct ParsedContentTypes {
@@ -146,7 +149,7 @@ impl Package {
             FastMap::with_capacity_and_hasher(archive.entries().len(), Default::default());
         let mut defects = PackageDefects::default();
         let mut content_types_entries = Vec::new();
-        let mut pieces: FastMap<String, (String, Vec<(u64, bool, usize)>)> = FastMap::default();
+        let mut pieces: FastMap<String, PieceSequence> = FastMap::default();
         for (i, entry) in archive.entries().iter().enumerate() {
             if entry.is_directory() {
                 defects.directories.push(entry.name.clone());
@@ -186,8 +189,7 @@ impl Package {
                 pieces: Vec::new(),
             });
         }
-        let mut sequences: Vec<(String, (String, Vec<(u64, bool, usize)>))> =
-            pieces.into_iter().collect();
+        let mut sequences: Vec<(String, PieceSequence)> = pieces.into_iter().collect();
         sequences.sort_by(|a, b| a.0.cmp(&b.0));
         for (key, (logical, mut items)) in sequences {
             items.sort_by_key(|(number, _, _)| *number);

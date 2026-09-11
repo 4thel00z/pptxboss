@@ -19,5 +19,5 @@ Image parts are read with positioned reads, so a deck's media costs nothing
 until asked for. Linked images (`r:link`) resolve to an external target
 and have no bytes in the package. Embedded objects (`p:oleObj`) are listed
 by `Slide::objects` with their `progId` and part, and `Slide::object_bytes`
-reads them. Charts and diagrams are reported by kind and relationship id,
-not rendered.
+reads them. Charts and diagrams are not rendered; `Slide::charts` and
+`Slide::diagrams` give their text and data.

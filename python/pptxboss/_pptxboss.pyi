@@ -38,6 +38,8 @@ class Document:
         hidden_slides: bool = True,
         alt_text: bool = False,
         comments: bool = False,
+        charts: bool = True,
+        diagrams: bool = True,
     ) -> str: ...
     def text_reporting(
         self,
@@ -48,6 +50,8 @@ class Document:
         hidden_slides: bool = True,
         alt_text: bool = False,
         comments: bool = False,
+        charts: bool = True,
+        diagrams: bool = True,
     ) -> tuple[str, list[str]]: ...
     def slide_texts(
         self,
@@ -58,8 +62,21 @@ class Document:
         hidden_slides: bool = True,
         alt_text: bool = False,
         comments: bool = False,
+        charts: bool = True,
+        diagrams: bool = True,
     ) -> list[str]: ...
     def titles(self) -> list[str | None]: ...
+    def markdown(
+        self,
+        *,
+        headings: bool = True,
+        notes: bool = False,
+        comments: bool = False,
+        hidden_slides: bool = True,
+        hidden_shapes: bool = False,
+        furniture: bool = False,
+        images: bool = True,
+    ) -> str: ...
     def core_properties(self) -> CoreProperties | None: ...
     def app_properties(self) -> AppProperties | None: ...
     def sections(self) -> list[Section]: ...
@@ -85,10 +102,30 @@ class Slide:
     def title(self) -> str | None: ...
     @property
     def warnings(self) -> list[str]: ...
-    def text(self, *, furniture: bool = False, hidden_shapes: bool = False, alt_text: bool = False) -> str: ...
+    def text(
+        self,
+        *,
+        furniture: bool = False,
+        hidden_shapes: bool = False,
+        alt_text: bool = False,
+        charts: bool = True,
+        diagrams: bool = True,
+    ) -> str: ...
+    def markdown(
+        self,
+        *,
+        headings: bool = True,
+        notes: bool = False,
+        comments: bool = False,
+        hidden_shapes: bool = False,
+        furniture: bool = False,
+        images: bool = True,
+    ) -> str: ...
     def paragraphs(self) -> list[str]: ...
     def notes(self) -> str | None: ...
     def comments(self) -> list[Comment]: ...
+    def charts(self) -> list[Chart]: ...
+    def diagrams(self) -> list[Diagram]: ...
     def embedded_objects(self) -> list[EmbeddedObject]: ...
     def object_bytes(self, object: EmbeddedObject) -> bytes: ...
     def tables(self) -> list[list[list[str]]]: ...
@@ -116,6 +153,29 @@ class Shape:
     children: list[Shape]
     @property
     def is_title(self) -> bool: ...
+
+class ChartSeries:
+    """One series of a chart: name, category labels and values as written."""
+
+    name: str | None
+    categories: list[str]
+    values: list[str]
+
+class Chart:
+    """A chart on a slide: its cached words and numbers."""
+
+    shape_id: int
+    title: str | None
+    kinds: list[str]
+    category_axis_title: str | None
+    value_axis_title: str | None
+    series: list[ChartSeries]
+
+class Diagram:
+    """A diagram (SmartArt) on a slide: (level, text) per node, depth-first."""
+
+    shape_id: int
+    items: list[tuple[int, str]]
 
 class CoreProperties:
     """The Core Properties part (docProps/core.xml), every field optional text."""

@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
+use crate::chart::{parse_chart, ChartData};
 use crate::comments::{parse_authors, parse_comments, Comment, CommentAuthor};
+use crate::diagram::{parse_diagram, DiagramData};
 use crate::error::{Error, Result};
 use crate::model::{Content, PlaceholderKind, SlideContent, TextBody};
 use crate::opc::{Relationships, TargetMode};
@@ -442,26 +444,7 @@ impl Document {
         let mut report = ExtractReport::default();
         let mut texts = Vec::with_capacity(results.len());
         for (index, (text, slide_report)) in results.into_iter().enumerate() {
-            report.failed_slides.extend(
-                slide_report
-                    .failed_slides
-                    .into_iter()
-                    .map(|(_, err)| (index, err)),
-            );
-            report.failed_notes.extend(
-                slide_report
-                    .failed_notes
-                    .into_iter()
-                    .map(|(_, err)| (index, err)),
-            );
-            report.hidden_slides_skipped += slide_report.hidden_slides_skipped;
-            report.unknown_graphics += slide_report.unknown_graphics;
-            for uri in slide_report.unknown_graphic_uris {
-                if !report.unknown_graphic_uris.contains(&uri) {
-                    report.unknown_graphic_uris.push(uri);
-                }
-            }
-            report.unknown_elements += slide_report.unknown_elements;
+            report.merge(index, slide_report);
             texts.push(text);
         }
         (texts, report)
@@ -593,13 +576,12 @@ impl<'d> Slide<'d> {
 
     /// The slide text with default options and no notes.
     pub fn text(&self) -> String {
-        let mut out = String::new();
-        write_content_text(&self.content, &TextOptions::default(), &mut out);
-        out
+        let mut report = ExtractReport::default();
+        self.text_reporting(&TextOptions::default(), &mut report)
     }
 
-    /// The slide text with `options`, recording problems in `report`.
-    pub fn text_reporting(&self, options: &TextOptions, report: &mut ExtractReport) -> String {
+    /// Folds what the slide parser could not understand into `report`.
+    pub(crate) fn merge_parse_report(&self, report: &mut ExtractReport) {
         report.unknown_graphics += self.report.unknown_graphics.len() as u32;
         for uri in &self.report.unknown_graphics {
             if !report.unknown_graphic_uris.contains(uri) {
@@ -607,12 +589,100 @@ impl<'d> Slide<'d> {
             }
         }
         report.unknown_elements += self.report.unknown_elements;
+    }
+
+    /// The text of a chart or diagram frame, when the options ask for it;
+    /// unreadable parts are recorded in `report`.
+    fn frame_text(
+        &self,
+        shape: &crate::model::Shape,
+        options: &TextOptions,
+        report: &mut ExtractReport,
+    ) -> Option<String> {
+        let result = match &shape.content {
+            Content::Chart(Some(rel_id)) if options.charts => self.chart(rel_id).map(|chart| {
+                let mut out = String::new();
+                chart.write_text(&options.cell_separator, &mut out);
+                out
+            }),
+            Content::Diagram(Some(rel_id)) if options.diagrams => {
+                self.diagram(rel_id).map(|diagram| {
+                    let mut out = String::new();
+                    diagram.write_text(&mut out);
+                    out
+                })
+            }
+            _ => return None,
+        };
+        match result {
+            Ok(text) => Some(text).filter(|text| !text.is_empty()),
+            Err(err) => {
+                report.failed_frames.push((self.index, err.to_string()));
+                None
+            }
+        }
+    }
+
+    /// The chart part behind relationship `rel_id`, parsed.
+    pub fn chart(&self, rel_id: &str) -> Result<ChartData> {
+        let part = self.frame_part(rel_id)?;
+        let xml = self.doc.package.read_part(&part)?;
+        parse_chart(&xml).map_err(|err| xml_error(&part, err))
+    }
+
+    /// The diagram data part behind relationship `rel_id`, parsed.
+    pub fn diagram(&self, rel_id: &str) -> Result<DiagramData> {
+        let part = self.frame_part(rel_id)?;
+        let xml = self.doc.package.read_part(&part)?;
+        parse_diagram(&xml).map_err(|err| xml_error(&part, err))
+    }
+
+    fn frame_part(&self, rel_id: &str) -> Result<String> {
+        let rels = self.rels()?;
+        rels.target_of(rel_id)
+            .filter(|part| self.doc.package.has_part(part))
+            .ok_or_else(|| Error::MissingRelationship {
+                part: self.part.clone(),
+                id: rel_id.to_string(),
+            })
+    }
+
+    /// Every chart on the slide with the id of its graphic frame, in z-order.
+    pub fn charts(&self) -> Result<Vec<(u32, ChartData)>> {
+        let mut charts = Vec::new();
+        for shape in self.content.walk() {
+            if let Content::Chart(Some(rel_id)) = &shape.content {
+                charts.push((shape.id, self.chart(rel_id)?));
+            }
+        }
+        Ok(charts)
+    }
+
+    /// Every diagram on the slide with the id of its graphic frame, in z-order.
+    pub fn diagrams(&self) -> Result<Vec<(u32, DiagramData)>> {
+        let mut diagrams = Vec::new();
+        for shape in self.content.walk() {
+            if let Content::Diagram(Some(rel_id)) = &shape.content {
+                diagrams.push((shape.id, self.diagram(rel_id)?));
+            }
+        }
+        Ok(diagrams)
+    }
+
+    /// The slide text with `options`, recording problems in `report`.
+    pub fn text_reporting(&self, options: &TextOptions, report: &mut ExtractReport) -> String {
+        self.merge_parse_report(report);
         if self.is_hidden() && !options.hidden_slides {
             report.hidden_slides_skipped += 1;
             return String::new();
         }
         let mut out = String::new();
-        write_content_text(&self.content, options, &mut out);
+        write_content_text(
+            &self.content,
+            options,
+            &mut |shape| self.frame_text(shape, options, report),
+            &mut out,
+        );
         if options.notes {
             match self.notes() {
                 Ok(Some(notes)) if !notes.is_empty() => {

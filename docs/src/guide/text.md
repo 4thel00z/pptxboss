@@ -71,6 +71,28 @@ either byte order) is transcoded before parsing, and the verifier notes it.
 Text uses the `_xHHHH_` escape convention for control characters, which
 the reader decodes.
 
+## Charts and diagrams
+
+A chart contributes its title and a table of its cached data: a header of
+series names, then one row per category with each series' value, cells
+separated like table cells. Series with differing categories (scatter and
+bubble charts) become one row each. A diagram (SmartArt) contributes one
+line per node in tree order. Both are on by default and switched off with
+`TextOptions::charts` and `TextOptions::diagrams` (`--no-charts`,
+`--no-diagrams`). `Slide::charts` and `Slide::diagrams` return the data
+structured.
+
+## Markdown
+
+`Document::markdown` and `pptxboss markdown` render the deck: a `##`
+heading per slide (the title, or `Slide N`), bullets with their levels,
+plain paragraphs, bold, italic and links, GFM tables, `![alt](part)`
+images, a `**Chart: title**` table per chart, diagram outlines, embedded
+objects as italic labels, and speaker notes and comments as block quotes
+when asked. Slides are separated by a rule. Paragraphs that inherit their
+bullet from the list style are bullets inside body placeholders and plain
+text elsewhere.
+
 ## Comments and alternative text
 
 `TextOptions::comments` appends each slide's comments after its text and

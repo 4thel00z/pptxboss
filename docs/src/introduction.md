@@ -27,11 +27,11 @@ report the defects the reader silently works around.
 
 ## Scope
 
-Text extraction with paragraphs, line breaks, fields, tables and groups;
-speaker notes; comments of both flavours; sections; core and application
-properties; titles; pictures with their image parts; embedded objects;
-hyperlinks; alternative text; slide structure as a shape tree; a verifier
-with 72 clause-numbered rules; deck
+Text extraction with paragraphs, line breaks, fields, tables, groups,
+charts and diagrams; Markdown output; speaker notes; comments of both
+flavours; sections; core and application properties; titles; pictures with
+their image parts; embedded objects; hyperlinks; alternative text; slide
+structure as a shape tree; a verifier with 72 clause-numbered rules; deck
 creation with titles, bullets, paragraphs, text boxes, tables, pictures and
 notes; Markdown to slides. Rendering slides to images is out of scope.
 

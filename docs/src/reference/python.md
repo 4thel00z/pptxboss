@@ -11,16 +11,25 @@ core (or `PPTXBOSS_THREADS`), 1 stays on the calling thread. Read back as
 `slide_count`, `path`, `presentation_part`, `slide_size`, `slide_size_type`;
 `len()`, indexing with negative indexes, iteration; `slide(i)`, `slides()`,
 `titles()`, `text(...)`, `text_reporting(...)`, `slide_texts(...)`,
-`core_properties()`, `app_properties()`, `sections()`. Text methods take
-`notes`, `furniture`, `hidden_shapes`, `hidden_slides`, `alt_text`,
-`comments`.
+`markdown(...)`, `core_properties()`, `app_properties()`, `sections()`.
+Text methods take `notes`, `furniture`, `hidden_shapes`, `hidden_slides`,
+`alt_text`, `comments`, `charts`, `diagrams`; `markdown` takes `headings`,
+`notes`, `comments`, `hidden_slides`, `hidden_shapes`, `furniture`,
+`images`.
 
 ## `Slide`
 
 `index`, `number`, `part`, `hidden`, `name`, `title`, `warnings`;
-`text(furniture=, hidden_shapes=, alt_text=)`, `paragraphs()`, `notes()`,
-`comments()`, `tables()`, `shapes()`, `images()`, `image_bytes(image)`,
+`text(furniture=, hidden_shapes=, alt_text=, charts=, diagrams=)`,
+`markdown(...)`, `paragraphs()`, `notes()`, `comments()`, `tables()`,
+`shapes()`, `images()`, `image_bytes(image)`, `charts()`, `diagrams()`,
 `embedded_objects()`, `object_bytes(object)`, `hyperlink(rel_id)`.
+
+## `Chart`, `ChartSeries`, `Diagram`
+
+A chart's `shape_id`, `title`, `kinds` (e.g. `barChart`), axis titles and
+`series`, each with `name`, `categories` and `values` as written. A
+diagram's `shape_id` and `items`, `(level, text)` tuples depth-first.
 
 ## `CoreProperties`, `AppProperties`
 
