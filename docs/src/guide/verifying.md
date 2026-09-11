@@ -44,9 +44,8 @@ for finding in &report.findings {
 
 A violation of a "shall" is an error. A "should", an inconsistency
 PowerPoint itself tolerates, or a policy the specification leaves open is a
-warning. Anything merely notable is info. The severities were calibrated on
-790 public test decks and two decks authored by PowerPoint, which verify
-clean.
+warning. Anything merely notable is info. Decks saved by PowerPoint pass
+with no findings.
 
 ## Limitations
 

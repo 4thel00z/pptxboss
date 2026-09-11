@@ -1,6 +1,6 @@
 # Python reference
 
-The `.pyi` stubs shipped in the package are the authoritative signatures.
+The `.pyi` stubs shipped in the package give the exact signatures.
 
 ## `Document(path=None, *, data=None, threads=None)`
 
@@ -83,7 +83,7 @@ Raised for any processing error. `ValueError` for bad arguments,
 ## Threading
 
 Documents and slides are frozen and usable from any thread. Calls that
-read the archive release the GIL and run on a private materialization of
-the document, so calls from different threads run in parallel. Whole-deck
-calls (`slides()`, `titles()`, `text()`, `slide_texts()`,
-`text_reporting()`) spread slides over the cap set at construction.
+read the archive release the GIL and run on a private `Document` rebuilt
+over the same archive, so calls from different threads run in parallel.
+Whole-deck calls (`slides()`, `titles()`, `text()`, `slide_texts()`,
+`text_reporting()`) use up to the thread count set at construction.
