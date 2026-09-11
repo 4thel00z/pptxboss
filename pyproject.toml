@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pptxboss"
-version = "0.2.1"
+version = "0.3.0"
 description = "Fast PowerPoint (.pptx) reading in pure Rust: text, notes, tables, images and structure, with pythonic bindings"
 readme = "README.md"
 requires-python = ">=3.12"
