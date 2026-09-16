@@ -16,7 +16,8 @@ strict and cites the clause behind every finding.
 pip install pptxboss          # Python package
 cargo install pptxboss-cli    # the pptxboss binary
 pptxboss skill install        # this file into ./.claude/skills/pptxboss/
-pptxboss skill install --global
+pptxboss skill install --global   # into ~/.claude/skills/pptxboss/
+npx skills add 4thel00z/pptxboss   # the same file through skills.sh
 ```
 
 ## CLI
