@@ -16,6 +16,8 @@ toolchain present.
 cargo install pptxboss-cli
 ```
 
+Coding agents get a bundled [skill](https://github.com/4thel00z/pptxboss/blob/main/skills/pptxboss/SKILL.md): `pptxboss skill install` writes it into `./.claude/skills/pptxboss/`, and `pptxboss skill install -g` into the home directory.
+
 ## Rust crates
 
 ```toml
