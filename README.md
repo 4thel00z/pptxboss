@@ -65,6 +65,8 @@ pip install pptxboss          # Python package with the extension module
 cargo install pptxboss-cli    # the pptxboss binary
 ```
 
+Coding agents get a bundled [skill](skills/pptxboss/SKILL.md): `pptxboss skill install` writes it into the agent's skill directory, and `npx skills add 4thel00z/pptxboss` installs it from [skills.sh](https://skills.sh).
+
 ## Usage
 
 ```sh
