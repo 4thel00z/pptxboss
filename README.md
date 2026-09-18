@@ -7,8 +7,17 @@
 <p align="center">
   <a href="https://github.com/4thel00z/pptxboss/actions/workflows/ci.yaml"><img src="https://github.com/4thel00z/pptxboss/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
   <a href="https://github.com/4thel00z/pptxboss/actions/workflows/python-ci.yml"><img src="https://github.com/4thel00z/pptxboss/actions/workflows/python-ci.yml/badge.svg" alt="python-ci"></a>
+  <a href="https://4thel00z.github.io/pptxboss/"><img src="https://img.shields.io/badge/docs-book-blue?logo=mdbook&logoColor=white" alt="Documentation"></a>
+  <a href="https://pypi.org/project/pptxboss/"><img src="https://img.shields.io/pypi/v/pptxboss?logo=pypi&logoColor=white" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/rust-2021-000000?logo=rust&logoColor=white" alt="Rust 2021">
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="MIT OR Apache-2.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://4thel00z.github.io/pptxboss/">Docs</a> ·
+  <a href="https://pypi.org/project/pptxboss/">PyPI</a> ·
+  <a href="https://crates.io/crates/pptxboss-cli">crates.io</a> ·
+  <a href="#benchmarks">Benchmarks</a>
 </p>
 
 ---
@@ -264,6 +273,10 @@ the machine and on the cores macOS schedules the process on. Reproduce with
   packages only, so `check` refuses them, and PowerPoint 95 files are
   refused.
 - No rendering of slides to images.
+
+## Documentation
+
+The [pptxboss book](https://4thel00z.github.io/pptxboss/) covers installation, one guide chapter per task (text, notes and structure, images, verifying, creating decks, Markdown to slides) and CLI, Python, Rust and verifier-rule reference chapters. It is built with mdBook from [`docs/`](docs/) by the `book` workflow and published on GitHub Pages. Per-crate Rust API documentation is on [docs.rs](https://docs.rs/pptxboss-core).
 
 ## Development
 

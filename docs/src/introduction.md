@@ -36,8 +36,28 @@ rules; deck creation with titles, bullets, paragraphs, text boxes, tables,
 pictures and notes; Markdown to slides. Rendering slides to images is out
 of scope.
 
-## Chapters
+## Where to go next
 
-Each guide chapter covers one task, CLI first, then Python, then Rust, and
-ends with what the operation leaves out. The reference pages list every
-command, class and rule.
+[Installation](./installation.md) covers the wheel, the binary and the crates;
+the [Quickstart](./quickstart.md) shows the CLI, Python and Rust doing real
+work. The guide then takes one task per chapter:
+
+- [Extracting text](./guide/text.md): slide text, reading order, slide
+  selection, warnings for what was skipped.
+- [Notes, tables and structure](./guide/structure.md): speaker notes,
+  tables, the shape tree, titles and hyperlinks.
+- [Extracting images](./guide/images.md): each slide's pictures and the
+  bytes of their image parts, read only when asked for.
+- [Verifying a deck](./guide/verifying.md): the clause-numbered rules, their
+  codes and severities.
+- [Creating decks](./guide/creating.md): titles, bullets, text boxes, tables,
+  pictures and notes from the CLI and Rust.
+- [Markdown to slides](./guide/markdown.md): headings become slides, list
+  items bullets and `Notes:` lines speaker notes.
+
+The reference section holds the [CLI reference](./reference/cli.md), the
+[Python API](./reference/python.md), the [Rust crates](./reference/rust.md),
+the [verifier rules](./reference/rules.md) and the list of
+[limitations](./reference/limitations.md).
+
+pptxboss is dual-licensed under MIT or Apache-2.0, at your option.

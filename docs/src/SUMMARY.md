@@ -18,8 +18,8 @@
 
 # Reference
 
-- [CLI](reference/cli.md)
-- [Python](reference/python.md)
-- [Rust](reference/rust.md)
+- [pptxboss CLI reference](reference/cli.md)
+- [Python API reference](reference/python.md)
+- [Rust crate reference](reference/rust.md)
 - [Verifier rules](reference/rules.md)
 - [Limitations](reference/limitations.md)

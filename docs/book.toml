@@ -1,11 +1,18 @@
 [book]
 title = "pptxboss"
+description = "pptxboss documentation: extract text, notes, tables, charts and images from .pptx and .ppt decks, render them as Markdown, verify them against ECMA-376 and create decks from the CLI, Python and Rust."
 authors = ["4thel00z"]
-description = "A PowerPoint engine written from scratch in Rust: read, verify and create .pptx decks"
 language = "en"
 src = "src"
 
 [output.html]
+site-url = "/pptxboss/"
+default-theme = "light"
+preferred-dark-theme = "light"
+additional-css = ["theme/pptxboss.css"]
+additional-js = ["theme/pptxboss.js"]
 git-repository-url = "https://github.com/4thel00z/pptxboss"
 edit-url-template = "https://github.com/4thel00z/pptxboss/edit/main/docs/{path}"
-site-url = "/pptxboss/"
+
+[output.html.playground]
+runnable = false
