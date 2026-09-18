@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/4thel00z/pptxboss/compare/v0.3.0...v0.4.0) (2026-09-18)
+
+
+### Features
+
+* **cli:** skill install parity with pdfboss, skills.sh route ([#6](https://github.com/4thel00z/pptxboss/issues/6)) ([b5fa0f3](https://github.com/4thel00z/pptxboss/commit/b5fa0f3aa5c49aec0636193a9de8ab632c60ecb9))
+
+
+### Documentation
+
+* **book:** themed mdBook, canonical links, sitemap and README docs links ([40827b1](https://github.com/4thel00z/pptxboss/commit/40827b172adfb1803177f5479adcb4edad15945b))
+
 ## [0.3.0](https://github.com/4thel00z/pptxboss/compare/v0.2.1...v0.3.0) (2026-09-11)
 
 
