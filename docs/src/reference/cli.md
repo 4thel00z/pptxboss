@@ -62,7 +62,8 @@ Every rule: severity, code, clause, summary.
 
 `INPUT` may be `-` for standard input.
 
-## `pptxboss skill install [--global]`, `pptxboss skill show`
+## `pptxboss skill install [-g|--global]`, `pptxboss skill show`
 
-Installs the bundled agent skill into `./.claude/skills/pptxboss/SKILL.md`
-or `~/.claude/skills/pptxboss/SKILL.md`, or prints it.
+Installs the bundled agent skill into `./.claude/skills/pptxboss/SKILL.md`,
+or with `-g` into `~/.claude/skills/pptxboss/SKILL.md`, overwriting an
+earlier install. `show` prints it.
