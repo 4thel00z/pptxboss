@@ -251,6 +251,7 @@ fn styled_runs_read_back() {
                     Run::text("italic ").italic().strike().font("Georgia"),
                     Run::text("link").link(url),
                     Run::text(" again").link(url),
+                    Run::text(" mail").link("mailto:a@example.com"),
                 ])
                 .space_after(12),
             )
@@ -266,7 +267,7 @@ fn styled_runs_read_back() {
     assert!(report.findings.is_empty(), "{:#?}", report.findings);
     let doc = Document::load(bytes).unwrap();
     let slide = doc.slide(0).unwrap();
-    assert_eq!(slide.text(), "Runs\nBold italic link again\nCentered");
+    assert_eq!(slide.text(), "Runs\nBold italic link again mail\nCentered");
     let runs = &slide.content.shapes[1].text_body().unwrap().paragraphs[0].runs;
     assert_eq!(runs[0].props.bold, Some(true));
     assert_eq!(runs[0].props.underline, Some(true));
@@ -278,6 +279,11 @@ fn styled_runs_read_back() {
     assert_eq!(runs[3].props.hyperlink.as_deref(), Some(link_id.as_str()));
     let rels = slide.rels().unwrap();
     assert_eq!(rels.get(&link_id).unwrap().target, url);
+    let mail = rels
+        .get(runs[4].props.hyperlink.as_deref().unwrap())
+        .unwrap();
+    assert_eq!(mail.target, "mailto:a@example.com");
+    assert_eq!(mail.mode, pptxboss_core::opc::TargetMode::External);
     let package = doc.package().unwrap();
     let xml = String::from_utf8(
         package
@@ -315,7 +321,8 @@ fn themes_and_backgrounds_verify_clean() {
                 Slide::titled("Inverted")
                     .background(Background::solid(Color::rgb(0xFF, 0xFF, 0xFF)))
                     .inverted()
-                    .bullet("dark text on white"),
+                    .bullet("dark text on white")
+                    .notes("notes stay light"),
             )
             .slide(
                 Slide::titled("Picture")
@@ -357,6 +364,8 @@ fn themes_and_backgrounds_verify_clean() {
     ));
     assert!(inverted.contains(r#"<a:overrideClrMapping bg1="dk1" tx1="lt1""#));
     assert!(part("/ppt/slides/slide3.xml").contains(r#"<a:schemeClr val="accent3"/>"#));
+    assert!(part("/ppt/notesMasters/notesMaster1.xml")
+        .contains(r#"<p:clrMap bg1="dk1" tx1="lt1" bg2="dk2" tx2="lt2""#));
     let images = doc.slide(2).unwrap().images().unwrap();
     assert_eq!(images[0].part.as_deref(), Some("/ppt/media/image2.png"));
     assert!(doc.slide(0).unwrap().text().starts_with("Dark deck"));

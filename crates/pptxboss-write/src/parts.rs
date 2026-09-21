@@ -207,7 +207,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
             &mut xml_parts,
             "ppt/notesMasters/notesMaster1.xml",
             &format!("{CT_PML}notesMaster+xml"),
-            notes_master_xml(),
+            notes_master_xml(presentation.theme.inverted),
         );
         parts.push(rels_part(
             "ppt/notesMasters/_rels/notesMaster1.xml.rels",
@@ -301,7 +301,8 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
 fn rels_part(name: &str, rels: &[(String, String, String)]) -> PartOut {
     let mut xml = format!(r#"{DECL}<Relationships xmlns="{PKG_REL}">"#);
     for (id, rel_type, target) in rels {
-        let mode = match target.contains("://") {
+        let external = target.contains("://") || rel_type.ends_with("/hyperlink");
+        let mode = match external {
             true => r#" TargetMode="External""#,
             false => "",
         };
@@ -597,9 +598,11 @@ fn layout_xml<'a>(
     Ok((xml, rels.list))
 }
 
-fn notes_master_xml() -> String {
+/// The notes master keeps a light page under every theme: an inverted
+/// theme holds its light colors in the dark slots, so the map swaps back.
+fn notes_master_xml(theme_inverted: bool) -> String {
     format!(
-        r#"{DECL}<p:notesMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>{}{}{}</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>"#,
+        r#"{DECL}<p:notesMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>{}{}{}</p:spTree></p:cSld><p:clrMap {}/><p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>"#,
         group_header(),
         r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="Slide Image Placeholder 1"/><p:cNvSpPr><a:spLocks noGrp="1" noRot="1" noChangeAspect="1"/></p:cNvSpPr><p:nvPr><p:ph type="sldImg" idx="2"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1371600" y="1143000"/><a:ext cx="4114800" cy="3086100"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln w="12700"><a:solidFill><a:prstClr val="black"/></a:solidFill></a:ln></p:spPr></p:sp>"#,
         placeholder_sp(
@@ -609,7 +612,8 @@ fn notes_master_xml() -> String {
             Some(Rect::new(685_800, 4_400_550, 5_486_400, 3_600_450)),
             PLAIN_BODY_PR,
             &prompt("Click to edit Master text styles")
-        )
+        ),
+        clr_map_attrs(theme_inverted)
     )
 }
 
