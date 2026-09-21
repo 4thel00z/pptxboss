@@ -130,7 +130,8 @@ def test_runs_theme_and_background() -> None:
     assert write.Run("x", color="abcdef").color == "#ABCDEF"
     custom = write.Theme("mine", colors={"accent1": "#123456"}, font="Georgia", background=write.Background.picture(PNG))
     assert custom.colors["accent1"] == "#123456" and custom.major_font == "Georgia"
-    assert write.Theme.presets() == ["office", "dark", "slate", "forest", "sunset"]
+    assert write.Theme.presets()[:5] == ["office", "dark", "slate", "forest", "sunset"]
+    assert "mocha" in write.Theme.presets() and len(write.Theme.presets()) == 12
     assert pptxboss.check(data=write.Presentation(theme=custom).add(write.Slide("x")).to_bytes()) == []
     themed = write.from_markdown("# Hi\n\n## A\n- b\n", theme=write.Theme.preset("sunset"), font="Inter")
     assert pptxboss.check(data=themed.to_bytes()) == []

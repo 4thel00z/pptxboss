@@ -118,7 +118,9 @@ fn create_md_with_theme_preset() {
         "neon",
     ]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("office, dark, slate, forest, sunset"));
+    assert!(stderr.contains(
+        "office, dark, slate, forest, sunset, midnight, mocha, dracula, nord, tokyo, clay, mono"
+    ));
     for path in [md, out] {
         std::fs::remove_file(path).unwrap();
     }

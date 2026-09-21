@@ -39,7 +39,7 @@ pptxboss check --json --quiet deck.pptx
 pptxboss rules                          # every rule: severity, code, clause, summary
 pptxboss create text out.pptx --title "T" --bullet "a" --bullet "b" --notes "n"
 pptxboss create md out.pptx slides.md   # or '-' to read Markdown from stdin
-pptxboss create md out.pptx slides.md --theme dark --font Inter   # presets: office, dark, slate, forest, sunset
+pptxboss create md out.pptx slides.md --theme dark --font Inter   # presets: office, dark, slate, forest, sunset, midnight, mocha, dracula, nord, tokyo, clay, mono
 pptxboss create blank out.pptx --slides 3 --standard
 ```
 

@@ -57,11 +57,14 @@ Paragraph::runs(vec![
 .space_after(12)
 ```
 
-A `Theme` holds the twelve colors, a title font and a body font. Five
-presets ship: `office` (the default), `dark`, `slate`, `forest` and
-`sunset`. Backgrounds are solid colors, linear gradients or pictures and
-apply to the master through the theme, to one layout, or to one slide.
-A dark background needs light text: the `dark` and `sunset` presets are
+A `Theme` holds the twelve colors, a title font and a body font. Twelve
+presets ship: `office` (the default), `dark`, `slate`, `forest`, `sunset`,
+`midnight`, `mocha`, `dracula`, `nord`, `tokyo`, `clay` and `mono`.
+`mocha`, `dracula`, `nord` and `tokyo` carry the palettes of the editor
+themes of the same names; `midnight` is near-black with an emerald accent;
+`clay` and `mono` are light. Backgrounds are solid colors, linear gradients
+or pictures and apply to the master through the theme, to one layout, or
+to one slide. A dark background needs light text: the dark presets are
 inverted, which swaps the light and dark slots for the whole deck, and
 `Slide::inverted` or the `inverted` argument of `Theme::layout_background`
 swaps them again for one layout or slide.
