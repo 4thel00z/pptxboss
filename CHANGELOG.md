@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/4thel00z/pptxboss/compare/v1.0.0...v1.1.0) (2026-09-21)
+
+
+### Features
+
+* **write:** accent title slides, theme-safe tables, Title layout from a subtitle, styled example ([#11](https://github.com/4thel00z/pptxboss/issues/11)) ([197b227](https://github.com/4thel00z/pptxboss/commit/197b227130716d532709e22dfa98ae6e3f210a84))
+* **write:** seven more theme presets: midnight, mocha, dracula, nord, tokyo, clay, mono ([#9](https://github.com/4thel00z/pptxboss/issues/9)) ([2c3c492](https://github.com/4thel00z/pptxboss/commit/2c3c492dee0e08b360a06cfa7bcc1c241377e30a))
+
 ## [1.0.0](https://github.com/4thel00z/pptxboss/compare/v0.3.0...v1.0.0) (2026-09-21)
 
 
