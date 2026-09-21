@@ -32,8 +32,8 @@ charts and diagrams; Markdown output; speaker notes; comments, threaded
 comments included; sections; core and application properties; titles;
 pictures with their image parts; embedded objects; hyperlinks; alternative
 text; slide structure as a shape tree; a verifier with 72 clause-numbered
-rules; deck creation with titles, bullets, paragraphs, text boxes, tables,
-pictures and notes; Markdown to slides. Rendering slides to images is out
+rules; deck creation with titles, bullets, formatted runs, text boxes,
+tables, pictures, notes, themes and backgrounds; Markdown to slides. Rendering slides to images is out
 of scope.
 
 ## Where to go next
@@ -50,8 +50,9 @@ work. The guide then takes one task per chapter:
   bytes of their image parts, read only when asked for.
 - [Verifying a deck](./guide/verifying.md): the clause-numbered rules, their
   codes and severities.
-- [Creating decks](./guide/creating.md): titles, bullets, text boxes, tables,
-  pictures and notes from the CLI and Rust.
+- [Creating decks](./guide/creating.md): titles, bullets, formatted runs,
+  text boxes, tables, pictures, notes, themes and backgrounds from the CLI,
+  Rust and Python.
 - [Markdown to slides](./guide/markdown.md): headings become slides, list
   items bullets and `Notes:` lines speaker notes.
 

@@ -173,9 +173,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Create decks
 
 ```rust
-use pptxboss_write::{Presentation, Rect, Slide};
+use pptxboss_write::{Presentation, Rect, Slide, Theme};
 
 let deck = Presentation::new()
+    .theme(Theme::slate())
     .slide(Slide::title_slide("Quarterly review", Some("Q3 2026")))
     .slide(Slide::titled("Highlights").bullet("Revenue up").sub_bullet("in every region", 1).notes("Pause here"))
     .slide(Slide::titled("Numbers").table(Rect::inches(1.0, 1.8, 11.0, 2.0), vec![vec!["Region".into(), "Growth".into()], vec!["EMEA".into(), "12%".into()]], true));
@@ -258,7 +259,7 @@ the machine and on the cores macOS schedules the process on. Reproduce with
 |---|---|
 | `pptxboss-core` | Reads `.pptx` and legacy `.ppt` decks: slides, notes, tables, charts, diagrams, comments, pictures, properties, text and Markdown extraction |
 | `pptxboss-check` | The verifier: 72 clause-numbered rules over package and presentation structure |
-| `pptxboss-write` | Creates decks: titles, bullets, paragraphs, text boxes, tables, pictures, notes; Markdown to slides; deterministic output that passes the verifier with no findings |
+| `pptxboss-write` | Creates decks: titles, bullets, formatted runs with colors and links, text boxes, tables, pictures, notes; themes with presets and solid, gradient or picture backgrounds; Markdown to slides; deterministic output that passes the verifier with no findings |
 | `pptxboss-cli` | The `pptxboss` binary |
 | `pptxboss-py` | The `pptxboss._pptxboss` extension module behind the Python package |
 | `pptxboss-testkit` | In-memory ZIP and deck builders for tests; not published |
