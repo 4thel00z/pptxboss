@@ -35,7 +35,9 @@ deck.write_to("review.pptx")?;
 ```
 
 The layout is inferred when not set: a title with body text uses Title and
-Content, a title alone uses Title Only, no title uses Blank.
+Content, a title with a subtitle uses Title, a title alone uses Title Only,
+no title uses Blank. Title slides center the title in the first accent
+color; bullets take the same color.
 
 ## Styling
 
@@ -118,6 +120,6 @@ assert!(pptxboss_check::check_bytes(bytes, &Default::default())?.findings.is_emp
 ## Limitations
 
 Pictures must be PNG, JPEG, GIF, BMP or TIFF; their box is given
-explicitly. Tables use one built-in style and equal column widths. Titles,
+explicitly. Tables have equal column widths, a header rule in the first accent color and hairline row rules, and no cell fills. Titles,
 subtitles and table cells are plain text. There is no chart, diagram or
 embedded object creation, and no editing of existing decks.

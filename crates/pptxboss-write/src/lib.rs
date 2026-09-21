@@ -610,10 +610,11 @@ impl Slide {
         if let Some(layout) = self.layout {
             return layout;
         }
-        match (&self.title, self.body.is_empty()) {
-            (Some(_), false) => Layout::TitleAndContent,
-            (Some(_), true) => Layout::TitleOnly,
-            (None, _) => Layout::Blank,
+        match (&self.title, self.body.is_empty(), self.subtitle.is_some()) {
+            (Some(_), false, _) => Layout::TitleAndContent,
+            (Some(_), true, true) => Layout::Title,
+            (Some(_), true, false) => Layout::TitleOnly,
+            (None, _, _) => Layout::Blank,
         }
     }
 }
@@ -1155,6 +1156,9 @@ mod tests {
             Layout::TitleAndContent
         );
         assert_eq!(Slide::titled("t").effective_layout(), Layout::TitleOnly);
+        let mut subtitled = Slide::titled("t");
+        subtitled.subtitle = Some("s".to_string());
+        assert_eq!(subtitled.effective_layout(), Layout::Title);
         assert_eq!(Slide::new().effective_layout(), Layout::Blank);
         assert_eq!(
             Slide::title_slide("t", None).effective_layout(),

@@ -16,6 +16,13 @@ const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relatio
 const PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CT_PML: &str = "application/vnd.openxmlformats-officedocument.presentationml.";
 const TABLE_STYLE: &str = "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}";
+/// Cells draw no left, right or top line.
+const TABLE_OPEN_SIDES: &str =
+    r#"<a:lnL><a:noFill/></a:lnL><a:lnR><a:noFill/></a:lnR><a:lnT><a:noFill/></a:lnT>"#;
+/// Header cells end in a thick accent rule.
+const TABLE_HEAD_RULE: &str = r#"<a:lnB w="28575" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill><a:prstDash val="solid"/></a:lnB>"#;
+/// Body cells end in a faint text-colored rule.
+const TABLE_ROW_RULE: &str = r#"<a:lnB w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:alpha val="30000"/></a:schemeClr></a:solidFill><a:prstDash val="solid"/></a:lnB>"#;
 
 /// One part ready to be zipped.
 pub struct PartOut {
@@ -502,7 +509,7 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel
     for (level, size) in sizes.iter().enumerate() {
         let level = level + 1;
         let mar_l = 228_600 + (level as i64 - 1) * 457_200;
-        xml.push_str(&format!(r#"<a:lvl{level}pPr marL="{mar_l}" indent="-228600" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="{}"/></a:spcBef><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/><a:defRPr sz="{size}" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#, if level == 1 { 1000 } else { 500 }));
+        xml.push_str(&format!(r#"<a:lvl{level}pPr marL="{mar_l}" indent="-228600" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="{}"/></a:spcBef><a:buClr><a:schemeClr val="accent1"/></a:buClr><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/><a:defRPr sz="{size}" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#, if level == 1 { 1000 } else { 500 }));
     }
     xml.push_str(r#"</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr>"#);
     for level in 1..=9 {
@@ -541,7 +548,7 @@ fn layout_xml<'a>(
                     "Title 1",
                     r#"<p:ph type="ctrTitle"/>"#,
                     Some(frames.center_title),
-                    PLAIN_BODY_PR,
+                    r#"<a:bodyPr anchor="b"/><a:lstStyle><a:lvl1pPr algn="ctr"><a:defRPr sz="5400"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#,
                     &prompt("Click to edit Master title style")
                 ),
                 placeholder_sp(
@@ -810,17 +817,22 @@ fn slide_xml<'a>(
                     n => table.rect.cy / n as i64,
                 };
                 let mut tbl = format!(
-                    r#"<a:tbl><a:tblPr firstRow="{}" bandRow="1"><a:tableStyleId>{TABLE_STYLE}</a:tableStyleId></a:tblPr><a:tblGrid>"#,
+                    r#"<a:tbl><a:tblPr firstRow="{}" bandRow="0"/><a:tblGrid>"#,
                     u8::from(table.header)
                 );
                 for _ in 0..columns {
                     tbl.push_str(&format!(r#"<a:gridCol w="{col_w}"/>"#));
                 }
                 tbl.push_str("</a:tblGrid>");
-                for cells in &table.rows {
+                for (row, cells) in table.rows.iter().enumerate() {
+                    let heading = table.header && row == 0;
+                    let (bold, rule) = match heading {
+                        true => (r#" b="1""#, TABLE_HEAD_RULE),
+                        false => ("", TABLE_ROW_RULE),
+                    };
                     tbl.push_str(&format!(r#"<a:tr h="{row_h}">"#));
                     for cell in cells {
-                        tbl.push_str(&format!(r#"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>{}</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc>"#, text(cell)));
+                        tbl.push_str(&format!(r#"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="1600"{bold} dirty="0"/><a:t>{}</a:t></a:r></a:p></a:txBody><a:tcPr anchor="ctr">{TABLE_OPEN_SIDES}{rule}<a:noFill/></a:tcPr></a:tc>"#, text(cell)));
                     }
                     tbl.push_str("</a:tr>");
                 }
