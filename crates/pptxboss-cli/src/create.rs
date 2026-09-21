@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use pptxboss_write::{from_markdown, Presentation, Slide, SlideSize};
+use pptxboss_write::{from_markdown, Presentation, Slide, SlideSize, Theme};
 
 use crate::Failure;
 
@@ -44,7 +44,10 @@ pub enum Create {
         /// Use the 4:3 slide size instead of widescreen.
         #[arg(long)]
         standard: bool,
-        /// Theme font family.
+        /// Theme preset: office, dark, slate, forest or sunset.
+        #[arg(long)]
+        theme: Option<String>,
+        /// Font family for titles and body, applied over the theme.
         #[arg(long)]
         font: Option<String>,
     },
@@ -97,6 +100,7 @@ pub fn run(command: Create) -> Result<(), Failure> {
             out,
             input,
             standard,
+            theme,
             font,
         } => {
             let markdown = match input.to_str() == Some("-") {
@@ -107,6 +111,16 @@ pub fn run(command: Create) -> Result<(), Failure> {
                 })?,
             };
             let mut presentation = from_markdown(&markdown).size(size(standard));
+            if let Some(name) = theme {
+                let theme = Theme::preset(&name).ok_or_else(|| Failure {
+                    message: format!(
+                        "unknown theme {name:?}; use one of {}",
+                        Theme::PRESETS.join(", ")
+                    ),
+                    code: 2,
+                })?;
+                presentation = presentation.theme(theme);
+            }
             if let Some(font) = font {
                 presentation = presentation.font(font);
             }

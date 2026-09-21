@@ -146,22 +146,22 @@ mod tests {
         let first = &deck.slides[1];
         assert_eq!(first.title.as_deref(), Some("First"));
         assert_eq!(first.body.len(), 3);
-        assert_eq!(first.body[1].text, "nested bold");
+        assert_eq!(first.body[1].plain_text(), "nested bold");
         assert_eq!(first.body[1].level, 1);
         assert!(first.body[0].bullet);
         assert_eq!(first.notes.as_deref(), Some("remember\nthe second line"));
         let untitled = &deck.slides[2];
         assert_eq!(untitled.layout, Some(Layout::Blank));
-        assert_eq!(untitled.body[0].text, "free paragraph");
+        assert_eq!(untitled.body[0].plain_text(), "free paragraph");
         assert!(!untitled.body[0].bullet);
         let third = &deck.slides[3];
         assert_eq!(
             third
                 .body
                 .iter()
-                .map(|p| p.text.as_str())
+                .map(|p| p.plain_text())
                 .collect::<Vec<_>>(),
-            ["first", "second", "code here"]
+            ["first", "second", "code here"].map(String::from)
         );
         assert!(third.body[0].bullet);
         assert!(!third.body[2].bullet);

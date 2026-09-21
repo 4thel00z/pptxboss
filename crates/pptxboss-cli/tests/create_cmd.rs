@@ -82,3 +82,44 @@ fn create_blank_and_md() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+fn create_md_with_theme_preset() {
+    let md = temp("themed.md");
+    std::fs::write(&md, "# T\n\n## A\n- b\n").unwrap();
+    let out = temp("themed.pptx");
+    let (code, _, stderr) = run(&[
+        "create",
+        "md",
+        out.to_str().unwrap(),
+        md.to_str().unwrap(),
+        "--theme",
+        "forest",
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    let doc = pptxboss_core::Document::open(&out).unwrap();
+    let theme = String::from_utf8(
+        doc.package()
+            .unwrap()
+            .read_part("/ppt/theme/theme1.xml")
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(theme.contains(r#"name="forest""#));
+    let (code, _, _) = run(&["check", "--quiet", out.to_str().unwrap()]);
+    assert_eq!(code, 0);
+    let (code, _, stderr) = run(&[
+        "create",
+        "md",
+        out.to_str().unwrap(),
+        md.to_str().unwrap(),
+        "--theme",
+        "neon",
+    ]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("office, dark, slate, forest, sunset"));
+    for path in [md, out] {
+        std::fs::remove_file(path).unwrap();
+    }
+}

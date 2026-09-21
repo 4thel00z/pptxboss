@@ -1,6 +1,6 @@
 [package]
 name = "pptxboss-write"
-description = "Create .pptx decks in pure Rust: titles, bullets, tables, pictures and speaker notes, written deterministically (ECMA-376)"
+description = "Create .pptx decks in pure Rust: titles, formatted text, tables, pictures, themes, backgrounds and speaker notes, written deterministically (ECMA-376)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

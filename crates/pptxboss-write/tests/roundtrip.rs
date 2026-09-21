@@ -5,7 +5,8 @@ use pptxboss_check::{check_bytes, CheckOptions};
 use pptxboss_core::model::PlaceholderKind;
 use pptxboss_core::{Content, Document, TextOptions};
 use pptxboss_write::{
-    from_markdown, Layout, Metadata, Paragraph, Presentation, Rect, Slide, SlideSize,
+    from_markdown, Align, Background, Color, Layout, Metadata, Paragraph, Presentation, Rect, Run,
+    SchemeColor, Slide, SlideSize, Theme,
 };
 
 const PNG: &[u8] = &[
@@ -237,4 +238,159 @@ fn files_are_written_to_disk() {
         Some("Disk")
     );
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn styled_runs_read_back() {
+    let url = "https://example.com/?a=1&b=2";
+    let deck = Presentation::new().slide(
+        Slide::titled("Runs")
+            .body_paragraph(
+                Paragraph::runs(vec![
+                    Run::text("Bold ").bold().underline().size(20),
+                    Run::text("italic ").italic().strike().font("Georgia"),
+                    Run::text("link").link(url),
+                    Run::text(" again").link(url),
+                    Run::text(" mail").link("mailto:a@example.com"),
+                ])
+                .space_after(12),
+            )
+            .text_box(
+                Rect::inches(1.0, 4.0, 4.0, 1.0),
+                vec![Paragraph::text("Centered")
+                    .align(Align::Center)
+                    .color(Color::Scheme(SchemeColor::Accent2))],
+            ),
+    );
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let slide = doc.slide(0).unwrap();
+    assert_eq!(slide.text(), "Runs\nBold italic link again mail\nCentered");
+    let runs = &slide.content.shapes[1].text_body().unwrap().paragraphs[0].runs;
+    assert_eq!(runs[0].props.bold, Some(true));
+    assert_eq!(runs[0].props.underline, Some(true));
+    assert_eq!(runs[0].props.size, Some(2000));
+    assert_eq!(runs[1].props.italic, Some(true));
+    assert_eq!(runs[1].props.strike, Some(true));
+    assert_eq!(runs[1].props.typeface.as_deref(), Some("Georgia"));
+    let link_id = runs[2].props.hyperlink.clone().unwrap();
+    assert_eq!(runs[3].props.hyperlink.as_deref(), Some(link_id.as_str()));
+    let rels = slide.rels().unwrap();
+    assert_eq!(rels.get(&link_id).unwrap().target, url);
+    let mail = rels
+        .get(runs[4].props.hyperlink.as_deref().unwrap())
+        .unwrap();
+    assert_eq!(mail.target, "mailto:a@example.com");
+    assert_eq!(mail.mode, pptxboss_core::opc::TargetMode::External);
+    let package = doc.package().unwrap();
+    let xml = String::from_utf8(
+        package
+            .read_part("/ppt/slides/slide1.xml")
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(xml.contains(r#"algn="ctr""#));
+    assert!(xml.contains(r#"<a:schemeClr val="accent2"/>"#));
+    assert!(xml.contains(r#"<a:spcAft><a:spcPts val="1200"/></a:spcAft>"#));
+}
+
+#[test]
+fn themes_and_backgrounds_verify_clean() {
+    let theme = Theme::dark()
+        .background(Background::picture(PNG.to_vec()))
+        .layout_background(
+            Layout::Title,
+            Background::linear(
+                Color::rgb(0x10, 0x10, 0x10),
+                Color::Scheme(SchemeColor::Accent1),
+                90,
+            ),
+            false,
+        );
+    let build = || {
+        Presentation::new()
+            .theme(theme.clone())
+            .slide(Slide::title_slide(
+                "Dark deck",
+                Some("gradient title layout"),
+            ))
+            .slide(
+                Slide::titled("Inverted")
+                    .background(Background::solid(Color::rgb(0xFF, 0xFF, 0xFF)))
+                    .inverted()
+                    .bullet("dark text on white")
+                    .notes("notes stay light"),
+            )
+            .slide(
+                Slide::titled("Picture")
+                    .picture(PNG.to_vec(), Rect::inches(1.0, 1.0, 1.0, 1.0))
+                    .body_paragraph(
+                        Paragraph::text("accent").color(Color::Scheme(SchemeColor::Accent3)),
+                    ),
+            )
+    };
+    let bytes = build().to_bytes().unwrap();
+    assert_eq!(bytes, build().to_bytes().unwrap());
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let package = doc.package().unwrap();
+    let part = |name: &str| String::from_utf8(package.read_part(name).unwrap().to_vec()).unwrap();
+    let theme_part = part("/ppt/theme/theme1.xml");
+    assert!(theme_part.contains(r#"name="dark""#));
+    assert!(theme_part.contains(
+        r#"<a:dk1><a:srgbClr val="F5F5F5"/></a:dk1><a:lt1><a:srgbClr val="1E1E1E"/></a:lt1>"#
+    ));
+    let master = part("/ppt/slideMasters/slideMaster1.xml");
+    assert!(master.contains(r#"<p:clrMap bg1="lt1" tx1="dk1""#));
+    assert!(master.contains(r#"<a:blip r:embed="rId6"/>"#));
+    assert_eq!(
+        package
+            .resolve("/ppt/slideMasters/slideMaster1.xml", "rId6")
+            .unwrap()
+            .as_deref(),
+        Some("/ppt/media/image1.png")
+    );
+    assert!(part("/ppt/slideLayouts/slideLayout1.xml").contains(
+        r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="101010"/></a:gs><a:gs pos="100000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
+    ));
+    assert!(part("/ppt/slideLayouts/slideLayout2.xml").contains("<a:masterClrMapping/>"));
+    let inverted = part("/ppt/slides/slide2.xml");
+    assert!(inverted.contains(
+        r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
+    ));
+    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="dk1" tx1="lt1""#));
+    assert!(part("/ppt/slides/slide3.xml").contains(r#"<a:schemeClr val="accent3"/>"#));
+    assert!(part("/ppt/notesMasters/notesMaster1.xml")
+        .contains(r#"<p:clrMap bg1="dk1" tx1="lt1" bg2="dk2" tx2="lt2""#));
+    let images = doc.slide(2).unwrap().images().unwrap();
+    assert_eq!(images[0].part.as_deref(), Some("/ppt/media/image2.png"));
+    assert!(doc.slide(0).unwrap().text().starts_with("Dark deck"));
+}
+
+#[test]
+fn every_preset_verifies_clean() {
+    for name in Theme::PRESETS {
+        let bytes = Presentation::new()
+            .theme(Theme::preset(name).unwrap())
+            .slide(Slide::title_slide(name, Some("preset")))
+            .slide(Slide::titled("Body").bullet("one").sub_bullet("two", 1))
+            .to_bytes()
+            .unwrap();
+        let report = check_bytes(bytes, &CheckOptions::default()).unwrap();
+        assert!(report.findings.is_empty(), "{name}: {:#?}", report.findings);
+    }
+}
+
+#[test]
+fn bad_background_is_an_error() {
+    let deck = Presentation::new()
+        .theme(Theme::new("x").background(Background::picture(b"<svg/>".to_vec())));
+    assert!(matches!(
+        deck.to_bytes(),
+        Err(pptxboss_write::Error::UnsupportedBackgroundImage)
+    ));
 }
