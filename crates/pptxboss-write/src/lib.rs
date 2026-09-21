@@ -120,40 +120,152 @@ impl Rect {
     }
 }
 
-/// One paragraph of a text body.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Paragraph {
-    pub text: String,
-    /// Indent level 0 to 8.
-    pub level: u8,
-    /// Show a bullet character; false for plain paragraphs.
-    pub bullet: bool,
-    pub bold: bool,
-    pub italic: bool,
-    /// Font size in points; None inherits from the layout.
-    pub size: Option<u32>,
+/// An RGB color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 
-impl Paragraph {
-    pub fn text(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            level: 0,
-            bullet: false,
-            bold: false,
-            italic: false,
-            size: None,
+impl Rgb {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+
+    /// Parses `#RRGGBB` or `RRGGBB`, any case.
+    pub fn hex(text: &str) -> Option<Rgb> {
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        if digits.len() != 6 || !digits.is_ascii() {
+            return None;
+        }
+        let channel = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).ok();
+        Some(Rgb::new(channel(0)?, channel(2)?, channel(4)?))
+    }
+
+    /// `RRGGBB` in upper case.
+    pub fn to_hex(self) -> String {
+        format!("{:02X}{:02X}{:02X}", self.r, self.g, self.b)
+    }
+}
+
+/// The twelve color slots of a theme (ECMA-376 20.1.6.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchemeColor {
+    Dark1,
+    Light1,
+    Dark2,
+    Light2,
+    Accent1,
+    Accent2,
+    Accent3,
+    Accent4,
+    Accent5,
+    Accent6,
+    Hyperlink,
+    FollowedHyperlink,
+}
+
+impl SchemeColor {
+    pub const ALL: [SchemeColor; 12] = [
+        SchemeColor::Dark1,
+        SchemeColor::Light1,
+        SchemeColor::Dark2,
+        SchemeColor::Light2,
+        SchemeColor::Accent1,
+        SchemeColor::Accent2,
+        SchemeColor::Accent3,
+        SchemeColor::Accent4,
+        SchemeColor::Accent5,
+        SchemeColor::Accent6,
+        SchemeColor::Hyperlink,
+        SchemeColor::FollowedHyperlink,
+    ];
+
+    /// The slot's name: `dark1`, `light1`, `dark2`, `light2`, `accent1` to
+    /// `accent6`, `hyperlink`, `followed_hyperlink`.
+    pub fn name(self) -> &'static str {
+        match self {
+            SchemeColor::Dark1 => "dark1",
+            SchemeColor::Light1 => "light1",
+            SchemeColor::Dark2 => "dark2",
+            SchemeColor::Light2 => "light2",
+            SchemeColor::Accent1 => "accent1",
+            SchemeColor::Accent2 => "accent2",
+            SchemeColor::Accent3 => "accent3",
+            SchemeColor::Accent4 => "accent4",
+            SchemeColor::Accent5 => "accent5",
+            SchemeColor::Accent6 => "accent6",
+            SchemeColor::Hyperlink => "hyperlink",
+            SchemeColor::FollowedHyperlink => "followed_hyperlink",
         }
     }
 
-    pub fn bullet(text: impl Into<String>, level: u8) -> Self {
+    pub fn from_name(name: &str) -> Option<SchemeColor> {
+        SchemeColor::ALL
+            .into_iter()
+            .find(|slot| slot.name() == name)
+    }
+
+    /// The ECMA-376 token used in XML.
+    pub(crate) fn xml(self) -> &'static str {
+        match self {
+            SchemeColor::Dark1 => "dk1",
+            SchemeColor::Light1 => "lt1",
+            SchemeColor::Dark2 => "dk2",
+            SchemeColor::Light2 => "lt2",
+            SchemeColor::Accent1 => "accent1",
+            SchemeColor::Accent2 => "accent2",
+            SchemeColor::Accent3 => "accent3",
+            SchemeColor::Accent4 => "accent4",
+            SchemeColor::Accent5 => "accent5",
+            SchemeColor::Accent6 => "accent6",
+            SchemeColor::Hyperlink => "hlink",
+            SchemeColor::FollowedHyperlink => "folHlink",
+        }
+    }
+}
+
+/// A color: fixed RGB or a theme slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Color {
+    Rgb(Rgb),
+    Scheme(SchemeColor),
+}
+
+impl Color {
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
+        Color::Rgb(Rgb::new(r, g, b))
+    }
+
+    /// Parses `#RRGGBB` or `RRGGBB`.
+    pub fn hex(text: &str) -> Option<Color> {
+        Rgb::hex(text).map(Color::Rgb)
+    }
+}
+
+/// A run of text with one set of character properties.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Run {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    /// Font size in points; None inherits.
+    pub size: Option<u32>,
+    pub color: Option<Color>,
+    pub font: Option<String>,
+    /// An absolute URL the run links to.
+    pub link: Option<String>,
+}
+
+impl Run {
+    pub fn text(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            level: level.min(8),
-            bullet: true,
-            bold: false,
-            italic: false,
-            size: None,
+            ..Self::default()
         }
     }
 
@@ -167,9 +279,155 @@ impl Paragraph {
         self
     }
 
+    pub fn underline(mut self) -> Self {
+        self.underline = true;
+        self
+    }
+
+    pub fn strike(mut self) -> Self {
+        self.strike = true;
+        self
+    }
+
     pub fn size(mut self, points: u32) -> Self {
         self.size = Some(points);
         self
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    pub fn font(mut self, font: impl Into<String>) -> Self {
+        self.font = Some(font.into());
+        self
+    }
+
+    pub fn link(mut self, url: impl Into<String>) -> Self {
+        self.link = Some(url.into());
+        self
+    }
+}
+
+/// Horizontal paragraph alignment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+/// One paragraph of a text body: runs plus paragraph properties.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Paragraph {
+    pub runs: Vec<Run>,
+    /// Indent level 0 to 8.
+    pub level: u8,
+    /// Show a bullet character; false for plain paragraphs.
+    pub bullet: bool,
+    pub align: Align,
+    /// Space before the paragraph in points.
+    pub space_before: Option<u32>,
+    /// Space after the paragraph in points.
+    pub space_after: Option<u32>,
+}
+
+impl Paragraph {
+    /// A plain paragraph with one run.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::runs(vec![Run::text(text)])
+    }
+
+    /// A bulleted paragraph with one run.
+    pub fn bullet(text: impl Into<String>, level: u8) -> Self {
+        Self::bullet_runs(vec![Run::text(text)], level)
+    }
+
+    pub fn runs(runs: Vec<Run>) -> Self {
+        Self {
+            runs,
+            ..Self::default()
+        }
+    }
+
+    pub fn bullet_runs(runs: Vec<Run>, level: u8) -> Self {
+        Self {
+            runs,
+            level: level.min(8),
+            bullet: true,
+            ..Self::default()
+        }
+    }
+
+    /// Appends a run.
+    pub fn run(mut self, run: Run) -> Self {
+        self.runs.push(run);
+        self
+    }
+
+    fn each_run(mut self, apply: impl Fn(&mut Run)) -> Self {
+        self.runs.iter_mut().for_each(apply);
+        self
+    }
+
+    /// Bold on every run.
+    pub fn bold(self) -> Self {
+        self.each_run(|run| run.bold = true)
+    }
+
+    /// Italic on every run.
+    pub fn italic(self) -> Self {
+        self.each_run(|run| run.italic = true)
+    }
+
+    /// Underline on every run.
+    pub fn underline(self) -> Self {
+        self.each_run(|run| run.underline = true)
+    }
+
+    /// Strikethrough on every run.
+    pub fn strike(self) -> Self {
+        self.each_run(|run| run.strike = true)
+    }
+
+    /// Size in points on every run.
+    pub fn size(self, points: u32) -> Self {
+        self.each_run(|run| run.size = Some(points))
+    }
+
+    /// Color on every run.
+    pub fn color(self, color: Color) -> Self {
+        self.each_run(|run| run.color = Some(color))
+    }
+
+    /// Font on every run.
+    pub fn font(self, font: impl Into<String>) -> Self {
+        let font = font.into();
+        self.each_run(|run| run.font = Some(font.clone()))
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
+    pub fn space_before(mut self, points: u32) -> Self {
+        self.space_before = Some(points);
+        self
+    }
+
+    pub fn space_after(mut self, points: u32) -> Self {
+        self.space_after = Some(points);
+        self
+    }
+
+    /// The runs' text joined.
+    pub fn plain_text(&self) -> String {
+        self.runs.iter().map(|run| run.text.as_str()).collect()
     }
 }
 
@@ -509,6 +767,38 @@ mod tests {
             Some(ImageFormat::Tiff)
         );
         assert_eq!(ImageFormat::sniff(b"<svg/>"), None);
+    }
+
+    #[test]
+    fn colors_parse_and_name() {
+        assert_eq!(Rgb::hex("#abcdef"), Some(Rgb::new(0xab, 0xcd, 0xef)));
+        assert_eq!(Rgb::hex("ABCDEF"), Some(Rgb::new(0xab, 0xcd, 0xef)));
+        assert_eq!(Rgb::hex("abc"), None);
+        assert_eq!(Rgb::hex("#gggggg"), None);
+        assert_eq!(Rgb::new(1, 2, 255).to_hex(), "0102FF");
+        for slot in SchemeColor::ALL {
+            assert_eq!(SchemeColor::from_name(slot.name()), Some(slot));
+        }
+        assert_eq!(SchemeColor::from_name("teal"), None);
+        assert_eq!(Color::hex("#000000"), Some(Color::rgb(0, 0, 0)));
+    }
+
+    #[test]
+    fn paragraph_builders_apply_to_every_run() {
+        let paragraph = Paragraph::text("a")
+            .run(Run::text("b").italic())
+            .bold()
+            .size(20)
+            .align(Align::Center);
+        assert_eq!(paragraph.plain_text(), "ab");
+        assert!(paragraph
+            .runs
+            .iter()
+            .all(|run| run.bold && run.size == Some(20)));
+        assert!(!paragraph.runs[0].italic && paragraph.runs[1].italic);
+        assert_eq!(paragraph.align, Align::Center);
+        assert_eq!(Paragraph::bullet("x", 12).level, 8);
+        assert_eq!(Paragraph::default().plain_text(), "");
     }
 
     #[test]

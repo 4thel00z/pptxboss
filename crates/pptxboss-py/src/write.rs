@@ -61,16 +61,19 @@ fn size_from(size: &SizeArg) -> PyResult<SlideSize> {
     }
 }
 
-fn styled(
-    mut paragraph: CoreParagraph,
-    bold: bool,
-    italic: bool,
-    size: Option<u32>,
-) -> CoreParagraph {
-    paragraph.bold = bold;
-    paragraph.italic = italic;
-    paragraph.size = size;
-    paragraph
+fn styled(paragraph: CoreParagraph, bold: bool, italic: bool, size: Option<u32>) -> CoreParagraph {
+    let paragraph = match bold {
+        true => paragraph.bold(),
+        false => paragraph,
+    };
+    let paragraph = match italic {
+        true => paragraph.italic(),
+        false => paragraph,
+    };
+    match size {
+        Some(points) => paragraph.size(points),
+        None => paragraph,
+    }
 }
 
 /// One paragraph with its formatting; `size` is in points.
@@ -104,7 +107,7 @@ impl Paragraph {
 
     #[getter]
     fn text(&self) -> String {
-        self.inner.text.clone()
+        self.inner.plain_text()
     }
 
     #[getter]
@@ -119,21 +122,21 @@ impl Paragraph {
 
     #[getter]
     fn bold(&self) -> bool {
-        self.inner.bold
+        !self.inner.runs.is_empty() && self.inner.runs.iter().all(|run| run.bold)
     }
 
     #[getter]
     fn italic(&self) -> bool {
-        self.inner.italic
+        !self.inner.runs.is_empty() && self.inner.runs.iter().all(|run| run.italic)
     }
 
     #[getter]
     fn size(&self) -> Option<u32> {
-        self.inner.size
+        self.inner.runs.first().and_then(|run| run.size)
     }
 
     fn __repr__(&self) -> String {
-        format!("write.Paragraph({:?})", self.inner.text)
+        format!("write.Paragraph({:?})", self.inner.plain_text())
     }
 }
 

@@ -3,7 +3,7 @@
 
 use crate::xml::{attr, text, DECL};
 use crate::{
-    Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape, Slide, SlideSize,
+    Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Run, Shape, Slide, SlideSize,
 };
 
 const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -575,19 +575,36 @@ fn notes_xml(notes: &str) -> String {
     )
 }
 
-fn run_props(paragraph: &Paragraph) -> String {
+fn run_props(run: &Run) -> String {
     let mut props = String::from(r#"<a:rPr lang="en-US""#);
-    if let Some(size) = paragraph.size {
+    if let Some(size) = run.size {
         props.push_str(&format!(r#" sz="{}""#, size * 100));
     }
-    if paragraph.bold {
+    if run.bold {
         props.push_str(r#" b="1""#);
     }
-    if paragraph.italic {
+    if run.italic {
         props.push_str(r#" i="1""#);
     }
     props.push_str(r#" dirty="0"/>"#);
     props
+}
+
+fn runs_xml(paragraph: &Paragraph) -> String {
+    if paragraph.runs.is_empty() {
+        return r#"<a:endParaRPr lang="en-US"/>"#.to_string();
+    }
+    paragraph
+        .runs
+        .iter()
+        .map(|run| {
+            format!(
+                "<a:r>{}<a:t>{}</a:t></a:r>",
+                run_props(run),
+                text(&run.text)
+            )
+        })
+        .collect()
 }
 
 /// Paragraphs for a body placeholder: bullets come from the master style,
@@ -603,11 +620,7 @@ fn body_paragraphs(paragraphs: &[Paragraph]) -> String {
                 level as i64 * 457_200
             ),
         };
-        xml.push_str(&format!(
-            r#"<a:p>{ppr}<a:r>{}<a:t>{}</a:t></a:r></a:p>"#,
-            run_props(paragraph),
-            text(&paragraph.text)
-        ));
+        xml.push_str(&format!("<a:p>{ppr}{}</a:p>", runs_xml(paragraph)));
     }
     if xml.is_empty() {
         xml.push_str(r#"<a:p><a:endParaRPr lang="en-US"/></a:p>"#);
@@ -628,11 +641,7 @@ fn box_paragraphs(paragraphs: &[Paragraph]) -> String {
             false if paragraph.level > 0 => format!(r#"<a:pPr lvl="{}"/>"#, paragraph.level),
             false => String::new(),
         };
-        xml.push_str(&format!(
-            r#"<a:p>{ppr}<a:r>{}<a:t>{}</a:t></a:r></a:p>"#,
-            run_props(paragraph),
-            text(&paragraph.text)
-        ));
+        xml.push_str(&format!("<a:p>{ppr}{}</a:p>", runs_xml(paragraph)));
     }
     if xml.is_empty() {
         xml.push_str(r#"<a:p><a:endParaRPr lang="en-US"/></a:p>"#);
