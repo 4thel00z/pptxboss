@@ -455,30 +455,130 @@ def rules() -> list[Rule]:
 class write:
     """The `pptxboss.write` submodule: build decks."""
 
-    class Paragraph:
-        """One formatted paragraph for text_box; size is in points."""
+    class Run:
+        """A run of text with one set of character properties; size is in points, color is #RRGGBB or a theme slot name, link an absolute URL."""
 
-        def __init__(self, text: str, *, level: int = 0, bullet: bool = False, bold: bool = False, italic: bool = False, size: int | None = None) -> None: ...
+        def __init__(
+            self,
+            text: str,
+            *,
+            bold: bool = False,
+            italic: bool = False,
+            underline: bool = False,
+            strike: bool = False,
+            size: int | None = None,
+            color: str | None = None,
+            font: str | None = None,
+            link: str | None = None,
+        ) -> None: ...
         @property
         def text(self) -> str: ...
-        @property
-        def level(self) -> int: ...
-        @property
-        def bullet(self) -> bool: ...
         @property
         def bold(self) -> bool: ...
         @property
         def italic(self) -> bool: ...
         @property
+        def underline(self) -> bool: ...
+        @property
+        def strike(self) -> bool: ...
+        @property
         def size(self) -> int | None: ...
+        @property
+        def color(self) -> str | None: ...
+        @property
+        def font(self) -> str | None: ...
+        @property
+        def link(self) -> str | None: ...
+
+    class Paragraph:
+        """One paragraph: a string or a list of strings and runs; keyword formatting applies to plain strings, a Run keeps its own; size and spacing are in points."""
+
+        def __init__(
+            self,
+            text: str | list[str | write.Run],
+            *,
+            level: int = 0,
+            bullet: bool = False,
+            align: str = "left",
+            bold: bool = False,
+            italic: bool = False,
+            size: int | None = None,
+            color: str | None = None,
+            space_before: int | None = None,
+            space_after: int | None = None,
+        ) -> None: ...
+        @property
+        def text(self) -> str: ...
+        @property
+        def runs(self) -> list[write.Run]: ...
+        @property
+        def level(self) -> int: ...
+        @property
+        def bullet(self) -> bool: ...
+        @property
+        def align(self) -> str: ...
+
+    class Background:
+        """A background: a solid color, a linear gradient or a picture."""
+
+        @staticmethod
+        def solid(color: str) -> write.Background: ...
+        @staticmethod
+        def gradient(stops: list[tuple[int, str]], angle: int = 90) -> write.Background:
+            """stops are (percent, color) pairs; angle is in degrees, 90 runs top to bottom."""
+        @staticmethod
+        def linear(start: str, end: str, angle: int = 90) -> write.Background: ...
+        @staticmethod
+        def picture(data: bytes) -> write.Background: ...
+
+    class Theme:
+        """Colors, fonts and backgrounds shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB."""
+
+        def __init__(
+            self,
+            name: str = "pptxboss",
+            *,
+            colors: dict[str, str] | None = None,
+            major_font: str | None = None,
+            minor_font: str | None = None,
+            font: str | None = None,
+            inverted: bool = False,
+            background: write.Background | None = None,
+        ) -> None: ...
+        @staticmethod
+        def preset(name: str) -> write.Theme:
+            """One of office, dark, slate, forest or sunset."""
+        @staticmethod
+        def presets() -> list[str]: ...
+        def layout_background(self, layout: str, background: write.Background, *, inverted: bool = False) -> write.Theme: ...
+        @property
+        def name(self) -> str: ...
+        @property
+        def major_font(self) -> str: ...
+        @property
+        def minor_font(self) -> str: ...
+        @property
+        def inverted(self) -> bool: ...
+        @property
+        def colors(self) -> dict[str, str]: ...
 
     class Slide:
         """One slide under construction; coordinates are inches."""
 
-        def __init__(self, title: str | None = None, *, subtitle: str | None = None, layout: str | None = None, notes: str | None = None, hidden: bool = False) -> None: ...
-        def bullet(self, text: str, level: int = 0, *, bold: bool = False, italic: bool = False, size: int | None = None) -> write.Slide: ...
-        def paragraph(self, text: str, *, bold: bool = False, italic: bool = False, size: int | None = None) -> write.Slide: ...
-        def text_box(self, x: float, y: float, w: float, h: float, lines: list[str | write.Paragraph], *, bullets: bool = False, bold: bool = False, italic: bool = False, size: int | None = None) -> write.Slide: ...
+        def __init__(
+            self,
+            title: str | None = None,
+            *,
+            subtitle: str | None = None,
+            layout: str | None = None,
+            notes: str | None = None,
+            hidden: bool = False,
+            background: write.Background | None = None,
+            inverted: bool = False,
+        ) -> None: ...
+        def bullet(self, text: str | list[str | write.Run], level: int = 0, *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...
+        def paragraph(self, text: str | list[str | write.Run], *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None, align: str = "left") -> write.Slide: ...
+        def text_box(self, x: float, y: float, w: float, h: float, lines: list[str | write.Paragraph], *, bullets: bool = False, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...
         def table(self, x: float, y: float, w: float, h: float, rows: list[list[str]], *, header: bool = True) -> write.Slide: ...
         def picture(self, data: bytes, x: float, y: float, w: float, h: float, *, description: str | None = None) -> write.Slide: ...
         @property
@@ -493,6 +593,7 @@ class write:
             self,
             *,
             size: str | tuple[float, float] = "widescreen",
+            theme: write.Theme | None = None,
             font: str | None = None,
             title: str | None = None,
             creator: str | None = None,
@@ -500,7 +601,7 @@ class write:
             keywords: str | None = None,
             timestamp: str | None = None,
         ) -> None:
-            """size is widescreen, standard or (width, height) in inches; timestamp is W3C-DTF for created and modified."""
+            """size is widescreen, standard or (width, height) in inches; font applies over the theme; timestamp is W3C-DTF for created and modified."""
         def add(self, slide: write.Slide) -> write.Presentation: ...
         @property
         def slide_count(self) -> int: ...
@@ -509,4 +610,4 @@ class write:
         def save(self, path: str | PathLike[str]) -> None: ...
 
     @staticmethod
-    def from_markdown(markdown: str, *, size: str | tuple[float, float] = "widescreen", font: str | None = None) -> write.Presentation: ...
+    def from_markdown(markdown: str, *, size: str | tuple[float, float] = "widescreen", theme: write.Theme | None = None, font: str | None = None) -> write.Presentation: ...

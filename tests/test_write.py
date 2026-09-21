@@ -106,3 +106,41 @@ def test_metadata_and_custom_size_round_trip() -> None:
     with pytest.raises(ValueError):
         write.Presentation(size="letter")
     assert pptxboss.check(data=deck.to_bytes()) == []
+
+
+def test_runs_theme_and_background() -> None:
+    theme = write.Theme.preset("dark").layout_background("title", write.Background.linear("#101010", "accent1"), inverted=False)
+    deck = write.Presentation(theme=theme)
+    deck.add(write.Slide("Dark deck", subtitle="sub", layout="title"))
+    deck.add(
+        write.Slide("Runs", background=write.Background.solid("#FFFFFF"), inverted=True)
+        .bullet(["Revenue ", write.Run("up 12%", bold=True, color="accent1", link="https://example.com")])
+        .paragraph("centered", align="center", color="#FF0000")
+    )
+    data = deck.to_bytes()
+    assert pptxboss.check(data=data) == []
+    doc = pptxboss.Document(data=data)
+    assert doc[1].text() == "Runs\nRevenue up 12%\ncentered"
+    runs = doc[1].shapes()[1].paragraphs[0].runs
+    assert runs[1].bold is True and runs[1].hyperlink is not None
+    paragraph = write.Paragraph(["a", write.Run("b", italic=True)], bold=True)
+    assert paragraph.text == "ab"
+    assert [run.bold for run in paragraph.runs] == [True, False]
+    assert paragraph.runs[1].italic
+    assert write.Run("x", color="abcdef").color == "#ABCDEF"
+    custom = write.Theme("mine", colors={"accent1": "#123456"}, font="Georgia", background=write.Background.picture(PNG))
+    assert custom.colors["accent1"] == "#123456" and custom.major_font == "Georgia"
+    assert write.Theme.presets() == ["office", "dark", "slate", "forest", "sunset"]
+    assert pptxboss.check(data=write.Presentation(theme=custom).add(write.Slide("x")).to_bytes()) == []
+    themed = write.from_markdown("# Hi\n\n## A\n- b\n", theme=write.Theme.preset("sunset"), font="Inter")
+    assert pptxboss.check(data=themed.to_bytes()) == []
+    with pytest.raises(ValueError, match="color"):
+        write.Run("x", color="teal")
+    with pytest.raises(ValueError, match="office"):
+        write.Theme.preset("nope")
+    with pytest.raises(ValueError, match="align"):
+        write.Paragraph("x", align="middle")
+    with pytest.raises(ValueError, match="slot"):
+        write.Theme("x", colors={"neon": "#000000"})
+    with pytest.raises(pptxboss.PptxError, match="background"):
+        write.Presentation(theme=write.Theme("x", background=write.Background.picture(b"<svg/>"))).to_bytes()
