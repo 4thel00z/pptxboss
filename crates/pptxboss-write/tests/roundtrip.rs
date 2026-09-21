@@ -5,8 +5,8 @@ use pptxboss_check::{check_bytes, CheckOptions};
 use pptxboss_core::model::PlaceholderKind;
 use pptxboss_core::{Content, Document, TextOptions};
 use pptxboss_write::{
-    from_markdown, Align, Color, Layout, Metadata, Paragraph, Presentation, Rect, Run, SchemeColor,
-    Slide, SlideSize,
+    from_markdown, Align, Background, Color, Layout, Metadata, Paragraph, Presentation, Rect, Run,
+    SchemeColor, Slide, SlideSize, Theme,
 };
 
 const PNG: &[u8] = &[
@@ -289,4 +289,95 @@ fn styled_runs_read_back() {
     assert!(xml.contains(r#"algn="ctr""#));
     assert!(xml.contains(r#"<a:schemeClr val="accent2"/>"#));
     assert!(xml.contains(r#"<a:spcAft><a:spcPts val="1200"/></a:spcAft>"#));
+}
+
+#[test]
+fn themes_and_backgrounds_verify_clean() {
+    let theme = Theme::dark()
+        .background(Background::picture(PNG.to_vec()))
+        .layout_background(
+            Layout::Title,
+            Background::linear(
+                Color::rgb(0x10, 0x10, 0x10),
+                Color::Scheme(SchemeColor::Accent1),
+                90,
+            ),
+            false,
+        );
+    let build = || {
+        Presentation::new()
+            .theme(theme.clone())
+            .slide(Slide::title_slide(
+                "Dark deck",
+                Some("gradient title layout"),
+            ))
+            .slide(
+                Slide::titled("Inverted")
+                    .background(Background::solid(Color::rgb(0xFF, 0xFF, 0xFF)))
+                    .inverted()
+                    .bullet("dark text on white"),
+            )
+            .slide(
+                Slide::titled("Picture")
+                    .picture(PNG.to_vec(), Rect::inches(1.0, 1.0, 1.0, 1.0))
+                    .body_paragraph(
+                        Paragraph::text("accent").color(Color::Scheme(SchemeColor::Accent3)),
+                    ),
+            )
+    };
+    let bytes = build().to_bytes().unwrap();
+    assert_eq!(bytes, build().to_bytes().unwrap());
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let package = doc.package().unwrap();
+    let part = |name: &str| String::from_utf8(package.read_part(name).unwrap().to_vec()).unwrap();
+    assert!(part("/ppt/theme/theme1.xml").contains(r#"name="dark""#));
+    let master = part("/ppt/slideMasters/slideMaster1.xml");
+    assert!(master.contains(r#"<p:clrMap bg1="dk1" tx1="lt1""#));
+    assert!(master.contains(r#"<a:blip r:embed="rId6"/>"#));
+    assert_eq!(
+        package
+            .resolve("/ppt/slideMasters/slideMaster1.xml", "rId6")
+            .unwrap()
+            .as_deref(),
+        Some("/ppt/media/image1.png")
+    );
+    assert!(part("/ppt/slideLayouts/slideLayout1.xml").contains(
+        r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="101010"/></a:gs><a:gs pos="100000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
+    ));
+    assert!(part("/ppt/slideLayouts/slideLayout2.xml").contains("<a:masterClrMapping/>"));
+    let inverted = part("/ppt/slides/slide2.xml");
+    assert!(inverted.contains(
+        r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
+    ));
+    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="lt1" tx1="dk1""#));
+    assert!(part("/ppt/slides/slide3.xml").contains(r#"<a:schemeClr val="accent3"/>"#));
+    let images = doc.slide(2).unwrap().images().unwrap();
+    assert_eq!(images[0].part.as_deref(), Some("/ppt/media/image2.png"));
+    assert!(doc.slide(0).unwrap().text().starts_with("Dark deck"));
+}
+
+#[test]
+fn every_preset_verifies_clean() {
+    for name in Theme::PRESETS {
+        let bytes = Presentation::new()
+            .theme(Theme::preset(name).unwrap())
+            .slide(Slide::title_slide(name, Some("preset")))
+            .slide(Slide::titled("Body").bullet("one").sub_bullet("two", 1))
+            .to_bytes()
+            .unwrap();
+        let report = check_bytes(bytes, &CheckOptions::default()).unwrap();
+        assert!(report.findings.is_empty(), "{name}: {:#?}", report.findings);
+    }
+}
+
+#[test]
+fn bad_background_is_an_error() {
+    let deck = Presentation::new()
+        .theme(Theme::new("x").background(Background::picture(b"<svg/>".to_vec())));
+    assert!(matches!(
+        deck.to_bytes(),
+        Err(pptxboss_write::Error::UnsupportedBackgroundImage)
+    ));
 }

@@ -1,13 +1,15 @@
 //! Serializes a [`Presentation`] into package parts (ECMA-376 Part 1,
 //! clauses 13, 19 and 21; Part 2, clauses 7 and 8).
 
-use crate::style::{ppr_xml, run_xml, ParagraphMode};
+use crate::style::{
+    bg_xml, clr_map_attrs, clr_map_ovr, ppr_xml, run_xml, theme_xml, ParagraphMode, NS_A,
+};
 use crate::xml::{attr, text, DECL};
 use crate::{
-    Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape, Slide, SlideSize,
+    Background, Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape, Slide,
+    SlideSize,
 };
 
-const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
@@ -22,10 +24,49 @@ pub struct PartOut {
     pub compress: bool,
 }
 
+/// An image part to write, numbered in order of registration.
+struct Media<'a> {
+    name: String,
+    format: ImageFormat,
+    data: &'a [u8],
+}
+
 struct Ctx<'a> {
     presentation: &'a Presentation,
     has_notes: bool,
-    media: Vec<(String, ImageFormat)>,
+    media: Vec<Media<'a>>,
+    /// Slide pictures seen so far, for error messages.
+    pictures: usize,
+}
+
+impl<'a> Ctx<'a> {
+    /// Registers image bytes as the next media part; returns the relationship target.
+    fn add_media(&mut self, data: &'a [u8]) -> Option<String> {
+        let format = ImageFormat::sniff(data)?;
+        let index = self.media.len() + 1;
+        self.media.push(Media {
+            name: format!("ppt/media/image{index}.{}", format.extension()),
+            format,
+            data,
+        });
+        Some(format!("../media/image{index}.{}", format.extension()))
+    }
+
+    /// The `p:bg` for a background, registering its picture when it has one.
+    fn background_xml(
+        &mut self,
+        background: Option<&'a Background>,
+        rels: &mut Rels,
+    ) -> Result<String> {
+        let Some(Background::Picture(data)) = background else {
+            return Ok(bg_xml(background, None));
+        };
+        let target = self
+            .add_media(data)
+            .ok_or(Error::UnsupportedBackgroundImage)?;
+        let rel = rels.add(&format!("{REL}image"), target);
+        Ok(bg_xml(background, Some(&rel)))
+    }
 }
 
 /// The geometry the layouts share, derived from the slide size.
@@ -63,6 +104,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         presentation,
         has_notes,
         media: Vec::new(),
+        pictures: 0,
     };
     let frames = Frames::for_size(presentation.size);
     let mut parts: Vec<PartOut> = Vec::new();
@@ -120,30 +162,17 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         &mut xml_parts,
         "ppt/theme/theme1.xml",
         "application/vnd.openxmlformats-officedocument.theme+xml",
-        theme_xml(&presentation.font),
+        theme_xml(&presentation.theme),
     );
 
+    let (master, master_rels) = master_xml(&mut ctx, &frames)?;
     push_xml(
         &mut parts,
         &mut xml_parts,
         "ppt/slideMasters/slideMaster1.xml",
         &format!("{CT_PML}slideMaster+xml"),
-        master_xml(&frames),
+        master,
     );
-    let mut master_rels: Vec<(String, String, String)> = (1..=4)
-        .map(|i| {
-            (
-                format!("rId{i}"),
-                format!("{REL}slideLayout"),
-                format!("../slideLayouts/slideLayout{i}.xml"),
-            )
-        })
-        .collect();
-    master_rels.push((
-        "rId5".into(),
-        format!("{REL}theme"),
-        "../theme/theme1.xml".into(),
-    ));
     parts.push(rels_part(
         "ppt/slideMasters/_rels/slideMaster1.xml.rels",
         &master_rels,
@@ -155,20 +184,17 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         Layout::Blank,
     ] {
         let index = layout.index();
+        let (xml, layout_rels) = layout_xml(&mut ctx, layout, &frames)?;
         push_xml(
             &mut parts,
             &mut xml_parts,
             &format!("ppt/slideLayouts/slideLayout{index}.xml"),
             &format!("{CT_PML}slideLayout+xml"),
-            layout_xml(layout, &frames),
+            xml,
         );
         parts.push(rels_part(
             &format!("ppt/slideLayouts/_rels/slideLayout{index}.xml.rels"),
-            &[(
-                "rId1".into(),
-                format!("{REL}slideMaster"),
-                "../slideMasters/slideMaster1.xml".into(),
-            )],
+            &layout_rels,
         ));
     }
     if has_notes {
@@ -229,19 +255,12 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         }
     }
 
-    let mut media_index = 0;
-    for slide in &presentation.slides {
-        for shape in &slide.shapes {
-            if let Shape::Picture(picture) = shape {
-                let (name, _) = &ctx.media[media_index];
-                media_index += 1;
-                parts.push(PartOut {
-                    name: name.clone(),
-                    data: picture.data.clone(),
-                    compress: false,
-                });
-            }
-        }
+    for media in &ctx.media {
+        parts.push(PartOut {
+            name: media.name.clone(),
+            data: media.data.to_vec(),
+            compress: false,
+        });
     }
 
     push_xml(
@@ -295,16 +314,17 @@ fn rels_part(name: &str, rels: &[(String, String, String)]) -> PartOut {
     }
 }
 
-fn content_types_xml(xml_parts: &[(String, String)], media: &[(String, ImageFormat)]) -> String {
+fn content_types_xml(xml_parts: &[(String, String)], media: &[Media<'_>]) -> String {
     let mut xml = format!(
         r#"{DECL}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>"#
     );
     let mut seen: Vec<ImageFormat> = Vec::new();
-    for (_, format) in media {
-        if seen.contains(format) {
+    for media in media {
+        let format = media.format;
+        if seen.contains(&format) {
             continue;
         }
-        seen.push(*format);
+        seen.push(format);
         xml.push_str(&format!(
             r#"<Default Extension="{}" ContentType="{}"/>"#,
             format.extension(),
@@ -445,14 +465,27 @@ fn prompt(text_value: &str) -> String {
     )
 }
 
-fn master_xml(frames: &Frames) -> String {
+fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel>)> {
+    let theme = &ctx.presentation.theme;
+    let mut rels = Rels::new();
+    for i in 1..=4 {
+        rels.add(
+            &format!("{REL}slideLayout"),
+            format!("../slideLayouts/slideLayout{i}.xml"),
+        );
+    }
+    rels.add(&format!("{REL}theme"), "../theme/theme1.xml".to_string());
+    let bg = ctx.background_xml(theme.background.as_ref(), &mut rels)?;
     let mut xml = format!(
-        r#"{DECL}<p:sldMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>{}"#,
+        r#"{DECL}<p:sldMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld>{bg}<p:spTree>{}"#,
         group_header()
     );
     xml.push_str(&placeholder_sp(2, "Title Placeholder 1", r#"<p:ph type="title"/>"#, Some(frames.title), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master title style")));
     xml.push_str(&placeholder_sp(3, "Text Placeholder 2", r#"<p:ph type="body" idx="1"/>"#, Some(frames.body), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master text styles")));
-    xml.push_str(r#"</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst>"#);
+    xml.push_str(&format!(
+        "</p:spTree></p:cSld><p:clrMap {}/><p:sldLayoutIdLst>",
+        clr_map_attrs(theme.inverted)
+    ));
     for i in 1..=4u32 {
         xml.push_str(&format!(
             r#"<p:sldLayoutId id="{}" r:id="rId{i}"/>"#,
@@ -472,10 +505,26 @@ fn master_xml(frames: &Frames) -> String {
         xml.push_str(&format!(r#"<a:lvl{level}pPr marL="{mar_l}" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1800" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#));
     }
     xml.push_str("</p:otherStyle></p:txStyles></p:sldMaster>");
-    xml
+    Ok((xml, rels.list))
 }
 
-fn layout_xml(layout: Layout, frames: &Frames) -> String {
+fn layout_xml<'a>(
+    ctx: &mut Ctx<'a>,
+    layout: Layout,
+    frames: &Frames,
+) -> Result<(String, Vec<Rel>)> {
+    let theme = &ctx.presentation.theme;
+    let mut rels = Rels::new();
+    rels.add(
+        &format!("{REL}slideMaster"),
+        "../slideMasters/slideMaster1.xml".to_string(),
+    );
+    let entry = theme.layout_background_for(layout);
+    let bg = match entry {
+        Some(entry) => ctx.background_xml(Some(&entry.background), &mut rels)?,
+        None => String::new(),
+    };
+    let ovr = clr_map_ovr(theme.inverted, entry.is_some_and(|entry| entry.inverted));
     let (kind, name, shapes) = match layout {
         Layout::Title => (
             "title",
@@ -537,10 +586,11 @@ fn layout_xml(layout: Layout, frames: &Frames) -> String {
         ),
         Layout::Blank => ("blank", "Blank", String::new()),
     };
-    format!(
-        r#"{DECL}<p:sldLayout xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" type="{kind}" preserve="1"><p:cSld name="{name}"><p:spTree>{}{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"#,
+    let xml = format!(
+        r#"{DECL}<p:sldLayout xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" type="{kind}" preserve="1"><p:cSld name="{name}">{bg}<p:spTree>{}{shapes}</p:spTree></p:cSld>{ovr}</p:sldLayout>"#,
         group_header()
-    )
+    );
+    Ok((xml, rels.list))
 }
 
 fn notes_master_xml() -> String {
@@ -634,9 +684,9 @@ fn paragraphs_xml(paragraphs: &[Paragraph], mode: ParagraphMode, rels: &mut Rels
     xml
 }
 
-fn slide_xml(
-    ctx: &mut Ctx<'_>,
-    slide: &Slide,
+fn slide_xml<'a>(
+    ctx: &mut Ctx<'a>,
+    slide: &'a Slide,
     n: usize,
     frames: &Frames,
 ) -> Result<(String, Vec<Rel>)> {
@@ -652,6 +702,7 @@ fn slide_xml(
             format!("../notesSlides/notesSlide{n}.xml"),
         );
     }
+    let bg = ctx.background_xml(slide.background.as_ref(), &mut rels)?;
     let mut shapes = String::new();
     let mut next_id = 2u32;
     if let Some(title) = &slide.title {
@@ -712,18 +763,11 @@ fn slide_xml(
                 next_id += 1;
             }
             Shape::Picture(picture) => {
-                let format = ImageFormat::sniff(&picture.data)
-                    .ok_or(Error::UnsupportedImage(ctx.media.len() + 1))?;
-                let media_name = format!(
-                    "ppt/media/image{}.{}",
-                    ctx.media.len() + 1,
-                    format.extension()
-                );
-                ctx.media.push((media_name.clone(), format));
-                let rel_id = rels.add(
-                    &format!("{REL}image"),
-                    format!("../media/image{}.{}", ctx.media.len(), format.extension()),
-                );
+                ctx.pictures += 1;
+                let target = ctx
+                    .add_media(&picture.data)
+                    .ok_or(Error::UnsupportedImage(ctx.pictures))?;
+                let rel_id = rels.add(&format!("{REL}image"), target);
                 let descr = picture
                     .description
                     .as_deref()
@@ -777,17 +821,11 @@ fn slide_xml(
         false => "",
     };
     let xml = format!(
-        r#"{DECL}<p:sld xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"{show}><p:cSld><p:spTree>{}{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#,
-        group_header()
+        r#"{DECL}<p:sld xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"{show}><p:cSld>{bg}<p:spTree>{}{shapes}</p:spTree></p:cSld>{}</p:sld>"#,
+        group_header(),
+        clr_map_ovr(ctx.presentation.theme.inverted, slide.inverted)
     );
     Ok((xml, rels.list))
-}
-
-fn theme_xml(font: &str) -> String {
-    let font = attr(font);
-    format!(
-        r#"{DECL}<a:theme xmlns:a="{NS_A}" name="pptxboss"><a:themeElements><a:clrScheme name="pptxboss"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2><a:accent3><a:srgbClr val="A5A5A5"/></a:accent3><a:accent4><a:srgbClr val="FFC000"/></a:accent4><a:accent5><a:srgbClr val="5B9BD5"/></a:accent5><a:accent6><a:srgbClr val="70AD47"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="pptxboss"><a:majorFont><a:latin typeface="{font}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="{font}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="pptxboss"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="19050" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>"#
-    )
 }
 
 fn core_xml(presentation: &Presentation) -> String {

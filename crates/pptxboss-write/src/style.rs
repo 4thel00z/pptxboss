@@ -1,8 +1,11 @@
-//! DrawingML for colors, runs and paragraph properties (ECMA-376 Part 1,
-//! clauses 20.1 and 21.1).
+//! DrawingML for colors, fills, backgrounds, color maps, runs, paragraph
+//! properties and the theme part (ECMA-376 Part 1, clauses 20.1 and 21.1).
 
-use crate::xml::{attr, text};
-use crate::{Align, Color, Paragraph, Run};
+use crate::xml::{attr, text, DECL};
+use crate::{Align, Background, Color, Paragraph, Run, SchemeColor, Theme};
+
+pub const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const FMT_SCHEME: &str = r#"<a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="19050" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>"#;
 
 const BULLET_FONT: &str = r#"<a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/>"#;
 
@@ -121,10 +124,94 @@ pub fn ppr_xml(paragraph: &Paragraph, mode: ParagraphMode) -> String {
     }
 }
 
+/// The fill element of a background; `blip_rel` is the image relationship of a picture.
+pub fn fill_xml(background: &Background, blip_rel: Option<&str>) -> String {
+    match background {
+        Background::Solid(color) => format!("<a:solidFill>{}</a:solidFill>", color_xml(*color)),
+        Background::Gradient { stops, angle } => {
+            let stops: String = stops
+                .iter()
+                .map(|stop| {
+                    format!(
+                        r#"<a:gs pos="{}">{}</a:gs>"#,
+                        stop.position.min(100) as u32 * 1000,
+                        color_xml(stop.color)
+                    )
+                })
+                .collect();
+            format!(
+                r#"<a:gradFill rotWithShape="1"><a:gsLst>{stops}</a:gsLst><a:lin ang="{}" scaled="0"/></a:gradFill>"#,
+                *angle as u32 * 60_000
+            )
+        }
+        Background::Picture(_) => format!(
+            r#"<a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="{}"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"#,
+            blip_rel.unwrap_or_default()
+        ),
+    }
+}
+
+/// The `p:bg` of a master, layout or slide; None is the theme background.
+pub fn bg_xml(background: Option<&Background>, blip_rel: Option<&str>) -> String {
+    match background {
+        None => {
+            r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#.to_string()
+        }
+        Some(background) => format!(
+            "<p:bg><p:bgPr>{}<a:effectLst/></p:bgPr></p:bg>",
+            fill_xml(background, blip_rel)
+        ),
+    }
+}
+
+/// The master's `p:clrMap` attributes.
+pub fn clr_map_attrs(inverted: bool) -> &'static str {
+    match inverted {
+        false => {
+            r#"bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink""#
+        }
+        true => {
+            r#"bg1="dk1" tx1="lt1" bg2="dk2" tx2="lt2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink""#
+        }
+    }
+}
+
+/// The color map override of a layout or slide: the master mapping, or the
+/// opposite of it when `inverted` is set.
+pub fn clr_map_ovr(theme_inverted: bool, inverted: bool) -> String {
+    match inverted {
+        false => "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>".to_string(),
+        true => format!(
+            "<p:clrMapOvr><a:overrideClrMapping {}/></p:clrMapOvr>",
+            clr_map_attrs(!theme_inverted)
+        ),
+    }
+}
+
+/// `ppt/theme/theme1.xml`.
+pub fn theme_xml(theme: &Theme) -> String {
+    let name = attr(&theme.name);
+    let slots: String = SchemeColor::ALL
+        .into_iter()
+        .map(|slot| {
+            let token = slot.xml();
+            format!(
+                r#"<a:{token}><a:srgbClr val="{}"/></a:{token}>"#,
+                theme.colors.get(slot).to_hex()
+            )
+        })
+        .collect();
+    let major = attr(&theme.major_font);
+    let minor = attr(&theme.minor_font);
+    format!(
+        r#"{DECL}<a:theme xmlns:a="{NS_A}" name="{name}"><a:themeElements><a:clrScheme name="{name}">{slots}</a:clrScheme><a:fontScheme name="{name}"><a:majorFont><a:latin typeface="{major}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="{minor}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="{name}">{FMT_SCHEME}</a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SchemeColor;
+    use crate::GradientStop;
 
     #[test]
     fn colors() {
@@ -183,5 +270,61 @@ mod tests {
             ),
             r#"<a:pPr algn="r"/>"#
         );
+    }
+
+    #[test]
+    fn fills_backgrounds_and_overrides() {
+        let gradient = Background::gradient(
+            vec![
+                GradientStop {
+                    position: 0,
+                    color: Color::rgb(0, 0, 0),
+                },
+                GradientStop {
+                    position: 50,
+                    color: Color::Scheme(SchemeColor::Accent1),
+                },
+            ],
+            90,
+        );
+        assert_eq!(
+            fill_xml(&gradient, None),
+            r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="000000"/></a:gs><a:gs pos="50000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
+        );
+        assert_eq!(
+            fill_xml(&Background::picture(vec![]), Some("rId9")),
+            r#"<a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="rId9"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"#
+        );
+        assert_eq!(
+            bg_xml(None, None),
+            r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#
+        );
+        assert_eq!(
+            bg_xml(Some(&Background::solid(Color::rgb(1, 2, 3))), None),
+            r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="010203"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
+        );
+        assert_eq!(
+            clr_map_ovr(false, false),
+            "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
+        );
+        assert_eq!(
+            clr_map_ovr(true, false),
+            "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
+        );
+        assert!(clr_map_ovr(false, true)
+            .starts_with(r#"<p:clrMapOvr><a:overrideClrMapping bg1="dk1" tx1="lt1""#));
+        assert!(clr_map_ovr(true, true)
+            .starts_with(r#"<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1""#));
+    }
+
+    #[test]
+    fn theme_part_and_color_map() {
+        let xml = theme_xml(&Theme::dark());
+        assert!(xml.contains(
+            r#"<a:clrScheme name="dark"><a:dk1><a:srgbClr val="1E1E1E"/></a:dk1><a:lt1>"#
+        ));
+        assert!(xml.contains(r#"<a:majorFont><a:latin typeface="Calibri"/>"#));
+        assert!(clr_map_attrs(false).starts_with(r#"bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2""#));
+        assert!(clr_map_attrs(true).starts_with(r#"bg1="dk1" tx1="lt1" bg2="dk2" tx2="lt2""#));
     }
 }

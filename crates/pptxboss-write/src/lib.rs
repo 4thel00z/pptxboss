@@ -1,6 +1,8 @@
 //! Creates `.pptx` decks from the ECMA-376 specification: a presentation
-//! with one master, four layouts and a theme, slides built from titles,
-//! bullet lists, paragraphs, tables and pictures, and speaker notes.
+//! with one master, four layouts and a theme of twelve colors and two
+//! fonts, slides built from titles, bullet lists, paragraphs of formatted
+//! runs, tables and pictures, solid, gradient or picture backgrounds, and
+//! speaker notes.
 //!
 //! Output is deterministic: fixed timestamps, entries in a fixed order,
 //! ids assigned in order of insertion. The result reads back through
@@ -37,6 +39,9 @@ pub enum Error {
         cells: usize,
         columns: usize,
     },
+    /// A background picture is not a format the writer can embed.
+    #[error("unsupported image format for background picture")]
+    UnsupportedBackgroundImage,
     #[error("{0}")]
     Other(String),
 }
@@ -473,6 +478,10 @@ pub struct Slide {
     pub shapes: Vec<Shape>,
     pub notes: Option<String>,
     pub hidden: bool,
+    /// This slide's own background; None shows the layout's or the master's.
+    pub background: Option<Background>,
+    /// Swap light and dark text slots on this slide relative to the theme.
+    pub inverted: bool,
 }
 
 impl Slide {
@@ -575,6 +584,17 @@ impl Slide {
         self
     }
 
+    pub fn background(mut self, background: Background) -> Self {
+        self.background = Some(background);
+        self
+    }
+
+    /// Light text on this slide when the theme is not inverted, and the reverse.
+    pub fn inverted(mut self) -> Self {
+        self.inverted = true;
+        self
+    }
+
     fn effective_layout(&self) -> Layout {
         if let Some(layout) = self.layout {
             return layout;
@@ -584,6 +604,310 @@ impl Slide {
             (Some(_), true) => Layout::TitleOnly,
             (None, _) => Layout::Blank,
         }
+    }
+}
+
+/// One stop of a gradient; `position` is a percentage 0 to 100.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GradientStop {
+    pub position: u8,
+    pub color: Color,
+}
+
+/// A background fill.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Background {
+    Solid(Color),
+    /// A linear gradient; `angle` is in degrees, 0 runs left to right, 90 top to bottom.
+    Gradient {
+        stops: Vec<GradientStop>,
+        angle: u16,
+    },
+    /// Picture bytes (PNG, JPEG, GIF, BMP or TIFF) stretched over the slide.
+    Picture(Vec<u8>),
+}
+
+impl Background {
+    pub fn solid(color: Color) -> Self {
+        Background::Solid(color)
+    }
+
+    pub fn gradient(stops: Vec<GradientStop>, angle: u16) -> Self {
+        Background::Gradient {
+            stops,
+            angle: angle % 360,
+        }
+    }
+
+    /// A two-stop gradient from `from` to `to`.
+    pub fn linear(from: Color, to: Color, angle: u16) -> Self {
+        Self::gradient(
+            vec![
+                GradientStop {
+                    position: 0,
+                    color: from,
+                },
+                GradientStop {
+                    position: 100,
+                    color: to,
+                },
+            ],
+            angle,
+        )
+    }
+
+    pub fn picture(data: Vec<u8>) -> Self {
+        Background::Picture(data)
+    }
+}
+
+/// A background for one layout.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayoutBackground {
+    pub layout: Layout,
+    pub background: Background,
+    /// Swap light and dark text slots on this layout.
+    pub inverted: bool,
+}
+
+/// The twelve colors of a theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColorScheme {
+    pub dark1: Rgb,
+    pub light1: Rgb,
+    pub dark2: Rgb,
+    pub light2: Rgb,
+    pub accent1: Rgb,
+    pub accent2: Rgb,
+    pub accent3: Rgb,
+    pub accent4: Rgb,
+    pub accent5: Rgb,
+    pub accent6: Rgb,
+    pub hyperlink: Rgb,
+    pub followed_hyperlink: Rgb,
+}
+
+impl ColorScheme {
+    pub fn get(&self, slot: SchemeColor) -> Rgb {
+        match slot {
+            SchemeColor::Dark1 => self.dark1,
+            SchemeColor::Light1 => self.light1,
+            SchemeColor::Dark2 => self.dark2,
+            SchemeColor::Light2 => self.light2,
+            SchemeColor::Accent1 => self.accent1,
+            SchemeColor::Accent2 => self.accent2,
+            SchemeColor::Accent3 => self.accent3,
+            SchemeColor::Accent4 => self.accent4,
+            SchemeColor::Accent5 => self.accent5,
+            SchemeColor::Accent6 => self.accent6,
+            SchemeColor::Hyperlink => self.hyperlink,
+            SchemeColor::FollowedHyperlink => self.followed_hyperlink,
+        }
+    }
+
+    pub fn set(&mut self, slot: SchemeColor, color: Rgb) {
+        let field = match slot {
+            SchemeColor::Dark1 => &mut self.dark1,
+            SchemeColor::Light1 => &mut self.light1,
+            SchemeColor::Dark2 => &mut self.dark2,
+            SchemeColor::Light2 => &mut self.light2,
+            SchemeColor::Accent1 => &mut self.accent1,
+            SchemeColor::Accent2 => &mut self.accent2,
+            SchemeColor::Accent3 => &mut self.accent3,
+            SchemeColor::Accent4 => &mut self.accent4,
+            SchemeColor::Accent5 => &mut self.accent5,
+            SchemeColor::Accent6 => &mut self.accent6,
+            SchemeColor::Hyperlink => &mut self.hyperlink,
+            SchemeColor::FollowedHyperlink => &mut self.followed_hyperlink,
+        };
+        *field = color;
+    }
+
+    /// Twelve `RRGGBB` values in slot order.
+    const fn from_hex_table(table: [u32; 12]) -> Self {
+        const fn c(v: u32) -> Rgb {
+            Rgb::new((v >> 16) as u8, (v >> 8) as u8, v as u8)
+        }
+        Self {
+            dark1: c(table[0]),
+            light1: c(table[1]),
+            dark2: c(table[2]),
+            light2: c(table[3]),
+            accent1: c(table[4]),
+            accent2: c(table[5]),
+            accent3: c(table[6]),
+            accent4: c(table[7]),
+            accent5: c(table[8]),
+            accent6: c(table[9]),
+            hyperlink: c(table[10]),
+            followed_hyperlink: c(table[11]),
+        }
+    }
+}
+
+impl Default for ColorScheme {
+    /// The Office scheme.
+    fn default() -> Self {
+        Self::from_hex_table([
+            0x000000, 0xFFFFFF, 0x44546A, 0xE7E6E6, 0x4472C4, 0xED7D31, 0xA5A5A5, 0xFFC000,
+            0x5B9BD5, 0x70AD47, 0x0563C1, 0x954F72,
+        ])
+    }
+}
+
+/// Colors, fonts and backgrounds shared by every slide.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Theme {
+    pub name: String,
+    pub colors: ColorScheme,
+    /// Title font.
+    pub major_font: String,
+    /// Body font.
+    pub minor_font: String,
+    /// Swap the light and dark slots in the master color map, for light
+    /// text on dark backgrounds.
+    pub inverted: bool,
+    /// Master background; None writes the theme background reference.
+    pub background: Option<Background>,
+    pub layout_backgrounds: Vec<LayoutBackground>,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self::office()
+    }
+}
+
+impl Theme {
+    pub const PRESETS: [&'static str; 5] = ["office", "dark", "slate", "forest", "sunset"];
+
+    /// Office colors, Calibri, not inverted, no backgrounds.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            colors: ColorScheme::default(),
+            major_font: "Calibri".to_string(),
+            minor_font: "Calibri".to_string(),
+            inverted: false,
+            background: None,
+            layout_backgrounds: Vec::new(),
+        }
+    }
+
+    pub fn office() -> Self {
+        Self::new("office")
+    }
+
+    pub fn dark() -> Self {
+        Self::new("dark")
+            .colors(ColorScheme::from_hex_table([
+                0x1E1E1E, 0xF5F5F5, 0x2D2D2D, 0xD0D0D0, 0x4FC3F7, 0xFFB74D, 0x81C784, 0xBA68C8,
+                0xE57373, 0xFFF176, 0x82B1FF, 0xCE93D8,
+            ]))
+            .inverted()
+    }
+
+    pub fn slate() -> Self {
+        Self::new("slate")
+            .colors(ColorScheme::from_hex_table([
+                0x1F2933, 0xF5F7FA, 0x3E4C59, 0xCBD2D9, 0x2F80ED, 0x56CCF2, 0x27AE60, 0xF2C94C,
+                0xEB5757, 0x9B51E0, 0x2F80ED, 0x9B51E0,
+            ]))
+            .fonts("Georgia", "Calibri")
+    }
+
+    pub fn forest() -> Self {
+        Self::new("forest").colors(ColorScheme::from_hex_table([
+            0x1B2B1B, 0xF4F8F2, 0x2F4F2F, 0xD9E4D2, 0x2E7D32, 0x66BB6A, 0xA5D6A7, 0xFFB300,
+            0x8D6E63, 0x26A69A, 0x1B5E20, 0x4E342E,
+        ]))
+    }
+
+    pub fn sunset() -> Self {
+        Self::new("sunset")
+            .colors(ColorScheme::from_hex_table([
+                0x2B1B2F, 0xFFF8F0, 0x5D2E46, 0xF3D9C7, 0xFF7043, 0xFFCA28, 0xEC407A, 0xAB47BC,
+                0x26C6DA, 0x9CCC65, 0xD84315, 0x6A1B9A,
+            ]))
+            .fonts("Georgia", "Calibri")
+            .inverted()
+            .background(Background::linear(
+                Color::rgb(0x2B, 0x1B, 0x2F),
+                Color::rgb(0x5D, 0x2E, 0x46),
+                90,
+            ))
+    }
+
+    /// A preset by name; see [`Theme::PRESETS`].
+    pub fn preset(name: &str) -> Option<Theme> {
+        match name {
+            "office" => Some(Self::office()),
+            "dark" => Some(Self::dark()),
+            "slate" => Some(Self::slate()),
+            "forest" => Some(Self::forest()),
+            "sunset" => Some(Self::sunset()),
+            _ => None,
+        }
+    }
+
+    pub fn color(mut self, slot: SchemeColor, color: Rgb) -> Self {
+        self.colors.set(slot, color);
+        self
+    }
+
+    pub fn colors(mut self, colors: ColorScheme) -> Self {
+        self.colors = colors;
+        self
+    }
+
+    pub fn fonts(mut self, major: impl Into<String>, minor: impl Into<String>) -> Self {
+        self.major_font = major.into();
+        self.minor_font = minor.into();
+        self
+    }
+
+    /// One font for titles and body.
+    pub fn font(self, font: impl Into<String>) -> Self {
+        let font = font.into();
+        self.fonts(font.clone(), font)
+    }
+
+    pub fn inverted(mut self) -> Self {
+        self.inverted = true;
+        self
+    }
+
+    /// The master background; every layout and slide without its own shows it.
+    pub fn background(mut self, background: Background) -> Self {
+        self.background = Some(background);
+        self
+    }
+
+    /// A background for one layout; `inverted` swaps light and dark text
+    /// slots on that layout relative to the theme.
+    pub fn layout_background(
+        mut self,
+        layout: Layout,
+        background: Background,
+        inverted: bool,
+    ) -> Self {
+        self.layout_backgrounds
+            .retain(|entry| entry.layout != layout);
+        self.layout_backgrounds.push(LayoutBackground {
+            layout,
+            background,
+            inverted,
+        });
+        self
+    }
+
+    pub(crate) fn layout_background_for(&self, layout: Layout) -> Option<&LayoutBackground> {
+        self.layout_backgrounds
+            .iter()
+            .find(|entry| entry.layout == layout)
     }
 }
 
@@ -616,8 +940,7 @@ pub struct Presentation {
     pub size: SlideSize,
     pub slides: Vec<Slide>,
     pub metadata: Metadata,
-    /// Body font family for the theme; PowerPoint substitutes when absent.
-    pub font: String,
+    pub theme: Theme,
 }
 
 impl Default for Presentation {
@@ -626,7 +949,7 @@ impl Default for Presentation {
             size: SlideSize::WIDESCREEN,
             slides: Vec::new(),
             metadata: Metadata::default(),
-            font: "Calibri".to_string(),
+            theme: Theme::default(),
         }
     }
 }
@@ -651,8 +974,14 @@ impl Presentation {
         self
     }
 
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// One font for titles and body, keeping the rest of the theme.
     pub fn font(mut self, font: impl Into<String>) -> Self {
-        self.font = font.into();
+        self.theme = self.theme.font(font);
         self
     }
 
@@ -800,6 +1129,52 @@ mod tests {
         assert_eq!(paragraph.align, Align::Center);
         assert_eq!(Paragraph::bullet("x", 12).level, 8);
         assert_eq!(Paragraph::default().plain_text(), "");
+    }
+
+    #[test]
+    fn themes_and_presets() {
+        assert_eq!(Theme::default(), Theme::office());
+        assert_eq!(Theme::default().colors.accent1, Rgb::new(0x44, 0x72, 0xC4));
+        assert!(Theme::preset("dark").unwrap().inverted);
+        assert!(Theme::preset("nope").is_none());
+        for name in Theme::PRESETS {
+            assert_eq!(Theme::preset(name).unwrap().name, name);
+        }
+        let theme = Theme::new("mine")
+            .color(SchemeColor::Accent1, Rgb::new(1, 2, 3))
+            .fonts("Georgia", "Arial")
+            .layout_background(Layout::Title, Background::solid(Color::rgb(0, 0, 0)), true)
+            .layout_background(Layout::Title, Background::solid(Color::rgb(9, 9, 9)), false);
+        assert_eq!(theme.colors.get(SchemeColor::Accent1), Rgb::new(1, 2, 3));
+        assert_eq!(
+            (theme.major_font.as_str(), theme.minor_font.as_str()),
+            ("Georgia", "Arial")
+        );
+        assert_eq!(theme.layout_backgrounds.len(), 1);
+        assert_eq!(
+            theme
+                .layout_background_for(Layout::Title)
+                .unwrap()
+                .background,
+            Background::solid(Color::rgb(9, 9, 9))
+        );
+        assert_eq!(Presentation::new().font("Inter").theme.minor_font, "Inter");
+        assert_eq!(
+            Background::linear(Color::rgb(0, 0, 0), Color::rgb(9, 9, 9), 405),
+            Background::Gradient {
+                stops: vec![
+                    GradientStop {
+                        position: 0,
+                        color: Color::rgb(0, 0, 0)
+                    },
+                    GradientStop {
+                        position: 100,
+                        color: Color::rgb(9, 9, 9)
+                    },
+                ],
+                angle: 45,
+            }
+        );
     }
 
     #[test]
