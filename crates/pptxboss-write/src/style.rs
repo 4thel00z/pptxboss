@@ -9,16 +9,20 @@ const FMT_SCHEME: &str = r#"<a:fillStyleLst><a:solidFill><a:schemeClr val="phClr
 
 const BULLET_FONT: &str = r#"<a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/>"#;
 
-/// `a:srgbClr` or `a:schemeClr`.
-pub fn color_xml(color: Color) -> String {
+/// `a:srgbClr` or `a:schemeClr`; `swapped` is set when the theme is
+/// inverted, so a scheme slot points at the token that holds its value.
+pub fn color_xml(color: Color, swapped: bool) -> String {
     match color {
         Color::Rgb(rgb) => format!(r#"<a:srgbClr val="{}"/>"#, rgb.to_hex()),
+        Color::Scheme(slot) if swapped => {
+            format!(r#"<a:schemeClr val="{}"/>"#, slot.swapped().xml())
+        }
         Color::Scheme(slot) => format!(r#"<a:schemeClr val="{}"/>"#, slot.xml()),
     }
 }
 
 /// One `a:r`; `link_rel` is the relationship id of the run's hyperlink.
-pub fn run_xml(run: &Run, link_rel: Option<&str>) -> String {
+pub fn run_xml(run: &Run, link_rel: Option<&str>, swapped: bool) -> String {
     let mut props = String::from(r#"<a:rPr lang="en-US""#);
     if let Some(size) = run.size {
         props.push_str(&format!(r#" sz="{}""#, size * 100));
@@ -38,7 +42,10 @@ pub fn run_xml(run: &Run, link_rel: Option<&str>) -> String {
     props.push_str(r#" dirty="0""#);
     let mut children = String::new();
     if let Some(color) = run.color {
-        children.push_str(&format!("<a:solidFill>{}</a:solidFill>", color_xml(color)));
+        children.push_str(&format!(
+            "<a:solidFill>{}</a:solidFill>",
+            color_xml(color, swapped)
+        ));
     }
     if let Some(font) = &run.font {
         children.push_str(&format!(r#"<a:latin typeface="{}"/>"#, attr(font)));
@@ -125,9 +132,11 @@ pub fn ppr_xml(paragraph: &Paragraph, mode: ParagraphMode) -> String {
 }
 
 /// The fill element of a background; `blip_rel` is the image relationship of a picture.
-pub fn fill_xml(background: &Background, blip_rel: Option<&str>) -> String {
+pub fn fill_xml(background: &Background, blip_rel: Option<&str>, swapped: bool) -> String {
     match background {
-        Background::Solid(color) => format!("<a:solidFill>{}</a:solidFill>", color_xml(*color)),
+        Background::Solid(color) => {
+            format!("<a:solidFill>{}</a:solidFill>", color_xml(*color, swapped))
+        }
         Background::Gradient { stops, angle } => {
             let stops: String = stops
                 .iter()
@@ -135,7 +144,7 @@ pub fn fill_xml(background: &Background, blip_rel: Option<&str>) -> String {
                     format!(
                         r#"<a:gs pos="{}">{}</a:gs>"#,
                         stop.position.min(100) as u32 * 1000,
-                        color_xml(stop.color)
+                        color_xml(stop.color, swapped)
                     )
                 })
                 .collect();
@@ -152,19 +161,20 @@ pub fn fill_xml(background: &Background, blip_rel: Option<&str>) -> String {
 }
 
 /// The `p:bg` of a master, layout or slide; None is the theme background.
-pub fn bg_xml(background: Option<&Background>, blip_rel: Option<&str>) -> String {
+pub fn bg_xml(background: Option<&Background>, blip_rel: Option<&str>, swapped: bool) -> String {
     match background {
         None => {
             r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#.to_string()
         }
         Some(background) => format!(
             "<p:bg><p:bgPr>{}<a:effectLst/></p:bgPr></p:bg>",
-            fill_xml(background, blip_rel)
+            fill_xml(background, blip_rel, swapped)
         ),
     }
 }
 
-/// The master's `p:clrMap` attributes.
+/// The `p:clrMap` attributes: the standard mapping, or light and dark
+/// swapped for an inverted layout or slide.
 pub fn clr_map_attrs(inverted: bool) -> &'static str {
     match inverted {
         false => {
@@ -176,28 +186,34 @@ pub fn clr_map_attrs(inverted: bool) -> &'static str {
     }
 }
 
-/// The color map override of a layout or slide: the master mapping, or the
-/// opposite of it when `inverted` is set.
-pub fn clr_map_ovr(theme_inverted: bool, inverted: bool) -> String {
+/// The color map override of a layout or slide: the master mapping, or
+/// light and dark swapped when `inverted` is set.
+pub fn clr_map_ovr(inverted: bool) -> String {
     match inverted {
         false => "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>".to_string(),
         true => format!(
             "<p:clrMapOvr><a:overrideClrMapping {}/></p:clrMapOvr>",
-            clr_map_attrs(!theme_inverted)
+            clr_map_attrs(true)
         ),
     }
 }
 
-/// `ppt/theme/theme1.xml`.
+/// `ppt/theme/theme1.xml`. An inverted theme writes its dark colors into
+/// the light slots and the reverse, so every renderer paints the
+/// background dark and the text light without relying on the color map.
 pub fn theme_xml(theme: &Theme) -> String {
     let name = attr(&theme.name);
     let slots: String = SchemeColor::ALL
         .into_iter()
         .map(|slot| {
             let token = slot.xml();
+            let source = match theme.inverted {
+                true => slot.swapped(),
+                false => slot,
+            };
             format!(
                 r#"<a:{token}><a:srgbClr val="{}"/></a:{token}>"#,
-                theme.colors.get(slot).to_hex()
+                theme.colors.get(source).to_hex()
             )
         })
         .collect();
@@ -216,12 +232,20 @@ mod tests {
     #[test]
     fn colors() {
         assert_eq!(
-            color_xml(Color::rgb(1, 2, 3)),
+            color_xml(Color::rgb(1, 2, 3), false),
             r#"<a:srgbClr val="010203"/>"#
         );
         assert_eq!(
-            color_xml(Color::Scheme(SchemeColor::Accent1)),
+            color_xml(Color::Scheme(SchemeColor::Accent1), true),
             r#"<a:schemeClr val="accent1"/>"#
+        );
+        assert_eq!(
+            color_xml(Color::Scheme(SchemeColor::Dark1), false),
+            r#"<a:schemeClr val="dk1"/>"#
+        );
+        assert_eq!(
+            color_xml(Color::Scheme(SchemeColor::Dark1), true),
+            r#"<a:schemeClr val="lt1"/>"#
         );
     }
 
@@ -235,11 +259,11 @@ mod tests {
             .color(Color::rgb(0, 0, 0))
             .font("Georgia");
         assert_eq!(
-            run_xml(&run, Some("rId7")),
+            run_xml(&run, Some("rId7"), false),
             r#"<a:r><a:rPr lang="en-US" sz="2000" b="1" u="sng" strike="sngStrike" dirty="0"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:latin typeface="Georgia"/><a:hlinkClick r:id="rId7"/></a:rPr><a:t>x</a:t></a:r>"#
         );
         assert_eq!(
-            run_xml(&Run::text("a<b"), None),
+            run_xml(&Run::text("a<b"), None, false),
             r#"<a:r><a:rPr lang="en-US" dirty="0"/><a:t>a&lt;b</a:t></a:r>"#
         );
     }
@@ -288,40 +312,37 @@ mod tests {
             90,
         );
         assert_eq!(
-            fill_xml(&gradient, None),
+            fill_xml(&gradient, None, false),
             r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="000000"/></a:gs><a:gs pos="50000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
         );
         assert_eq!(
-            fill_xml(&Background::picture(vec![]), Some("rId9")),
+            fill_xml(&Background::picture(vec![]), Some("rId9"), false),
             r#"<a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="rId9"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"#
         );
         assert_eq!(
-            bg_xml(None, None),
+            bg_xml(None, None, false),
             r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#
         );
         assert_eq!(
-            bg_xml(Some(&Background::solid(Color::rgb(1, 2, 3))), None),
+            bg_xml(Some(&Background::solid(Color::rgb(1, 2, 3))), None, false),
             r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="010203"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
         );
         assert_eq!(
-            clr_map_ovr(false, false),
+            clr_map_ovr(false),
             "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
         );
-        assert_eq!(
-            clr_map_ovr(true, false),
-            "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>"
-        );
-        assert!(clr_map_ovr(false, true)
+        assert!(clr_map_ovr(true)
             .starts_with(r#"<p:clrMapOvr><a:overrideClrMapping bg1="dk1" tx1="lt1""#));
-        assert!(clr_map_ovr(true, true)
-            .starts_with(r#"<p:clrMapOvr><a:overrideClrMapping bg1="lt1" tx1="dk1""#));
     }
 
     #[test]
     fn theme_part_and_color_map() {
         let xml = theme_xml(&Theme::dark());
         assert!(xml.contains(
-            r#"<a:clrScheme name="dark"><a:dk1><a:srgbClr val="1E1E1E"/></a:dk1><a:lt1>"#
+            r#"<a:clrScheme name="dark"><a:dk1><a:srgbClr val="F5F5F5"/></a:dk1><a:lt1><a:srgbClr val="1E1E1E"/></a:lt1><a:dk2><a:srgbClr val="D0D0D0"/></a:dk2><a:lt2><a:srgbClr val="2D2D2D"/></a:lt2><a:accent1><a:srgbClr val="4FC3F7"/>"#
+        ));
+        assert!(theme_xml(&Theme::office()).contains(
+            r#"<a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>"#
         ));
         assert!(xml.contains(r#"<a:majorFont><a:latin typeface="Calibri"/>"#));
         assert!(clr_map_attrs(false).starts_with(r#"bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2""#));

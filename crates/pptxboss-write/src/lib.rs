@@ -213,6 +213,17 @@ impl SchemeColor {
             .find(|slot| slot.name() == name)
     }
 
+    /// The slot that takes this one's place when a theme is inverted.
+    pub(crate) fn swapped(self) -> SchemeColor {
+        match self {
+            SchemeColor::Dark1 => SchemeColor::Light1,
+            SchemeColor::Light1 => SchemeColor::Dark1,
+            SchemeColor::Dark2 => SchemeColor::Light2,
+            SchemeColor::Light2 => SchemeColor::Dark2,
+            other => other,
+        }
+    }
+
     /// The ECMA-376 token used in XML.
     pub(crate) fn xml(self) -> &'static str {
         match self {
@@ -767,8 +778,8 @@ pub struct Theme {
     pub major_font: String,
     /// Body font.
     pub minor_font: String,
-    /// Swap the light and dark slots in the master color map, for light
-    /// text on dark backgrounds.
+    /// Swap the light and dark slots when the theme is written, so the
+    /// background takes `dark1` and text takes `light1`.
     pub inverted: bool,
     /// Master background; None writes the theme background reference.
     pub background: Option<Background>,

@@ -332,9 +332,13 @@ fn themes_and_backgrounds_verify_clean() {
     let doc = Document::load(bytes).unwrap();
     let package = doc.package().unwrap();
     let part = |name: &str| String::from_utf8(package.read_part(name).unwrap().to_vec()).unwrap();
-    assert!(part("/ppt/theme/theme1.xml").contains(r#"name="dark""#));
+    let theme_part = part("/ppt/theme/theme1.xml");
+    assert!(theme_part.contains(r#"name="dark""#));
+    assert!(theme_part.contains(
+        r#"<a:dk1><a:srgbClr val="F5F5F5"/></a:dk1><a:lt1><a:srgbClr val="1E1E1E"/></a:lt1>"#
+    ));
     let master = part("/ppt/slideMasters/slideMaster1.xml");
-    assert!(master.contains(r#"<p:clrMap bg1="dk1" tx1="lt1""#));
+    assert!(master.contains(r#"<p:clrMap bg1="lt1" tx1="dk1""#));
     assert!(master.contains(r#"<a:blip r:embed="rId6"/>"#));
     assert_eq!(
         package
@@ -351,7 +355,7 @@ fn themes_and_backgrounds_verify_clean() {
     assert!(inverted.contains(
         r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
     ));
-    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="lt1" tx1="dk1""#));
+    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="dk1" tx1="lt1""#));
     assert!(part("/ppt/slides/slide3.xml").contains(r#"<a:schemeClr val="accent3"/>"#));
     let images = doc.slide(2).unwrap().images().unwrap();
     assert_eq!(images[0].part.as_deref(), Some("/ppt/media/image2.png"));

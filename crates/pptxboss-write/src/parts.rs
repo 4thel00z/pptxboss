@@ -59,13 +59,17 @@ impl<'a> Ctx<'a> {
         rels: &mut Rels,
     ) -> Result<String> {
         let Some(Background::Picture(data)) = background else {
-            return Ok(bg_xml(background, None));
+            return Ok(bg_xml(background, None, self.presentation.theme.inverted));
         };
         let target = self
             .add_media(data)
             .ok_or(Error::UnsupportedBackgroundImage)?;
         let rel = rels.add(&format!("{REL}image"), target);
-        Ok(bg_xml(background, Some(&rel)))
+        Ok(bg_xml(
+            background,
+            Some(&rel),
+            self.presentation.theme.inverted,
+        ))
     }
 }
 
@@ -484,7 +488,7 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel
     xml.push_str(&placeholder_sp(3, "Text Placeholder 2", r#"<p:ph type="body" idx="1"/>"#, Some(frames.body), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master text styles")));
     xml.push_str(&format!(
         "</p:spTree></p:cSld><p:clrMap {}/><p:sldLayoutIdLst>",
-        clr_map_attrs(theme.inverted)
+        clr_map_attrs(false)
     ));
     for i in 1..=4u32 {
         xml.push_str(&format!(
@@ -524,7 +528,7 @@ fn layout_xml<'a>(
         Some(entry) => ctx.background_xml(Some(&entry.background), &mut rels)?,
         None => String::new(),
     };
-    let ovr = clr_map_ovr(theme.inverted, entry.is_some_and(|entry| entry.inverted));
+    let ovr = clr_map_ovr(entry.is_some_and(|entry| entry.inverted));
     let (kind, name, shapes) = match layout {
         Layout::Title => (
             "title",
@@ -664,7 +668,12 @@ impl Rels {
     }
 }
 
-fn paragraphs_xml(paragraphs: &[Paragraph], mode: ParagraphMode, rels: &mut Rels) -> String {
+fn paragraphs_xml(
+    paragraphs: &[Paragraph],
+    mode: ParagraphMode,
+    rels: &mut Rels,
+    swapped: bool,
+) -> String {
     let mut xml = String::new();
     for paragraph in paragraphs {
         xml.push_str("<a:p>");
@@ -674,7 +683,7 @@ fn paragraphs_xml(paragraphs: &[Paragraph], mode: ParagraphMode, rels: &mut Rels
         }
         for run in &paragraph.runs {
             let link = run.link.as_deref().map(|url| rels.hyperlink(url));
-            xml.push_str(&run_xml(run, link.as_deref()));
+            xml.push_str(&run_xml(run, link.as_deref(), swapped));
         }
         xml.push_str("</a:p>");
     }
@@ -703,6 +712,7 @@ fn slide_xml<'a>(
         );
     }
     let bg = ctx.background_xml(slide.background.as_ref(), &mut rels)?;
+    let swapped = ctx.presentation.theme.inverted;
     let mut shapes = String::new();
     let mut next_id = 2u32;
     if let Some(title) = &slide.title {
@@ -752,14 +762,14 @@ fn slide_xml<'a>(
             r#"<p:ph idx="1"/>"#,
             rect,
             PLAIN_BODY_PR,
-            &paragraphs_xml(&slide.body, ParagraphMode::Body, &mut rels),
+            &paragraphs_xml(&slide.body, ParagraphMode::Body, &mut rels, swapped),
         ));
         next_id += 1;
     }
     for shape in &slide.shapes {
         match shape {
             Shape::Text { paragraphs, rect } => {
-                shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), paragraphs_xml(paragraphs, ParagraphMode::Box, &mut rels)));
+                shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), paragraphs_xml(paragraphs, ParagraphMode::Box, &mut rels, swapped)));
                 next_id += 1;
             }
             Shape::Picture(picture) => {
@@ -823,7 +833,7 @@ fn slide_xml<'a>(
     let xml = format!(
         r#"{DECL}<p:sld xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"{show}><p:cSld>{bg}<p:spTree>{}{shapes}</p:spTree></p:cSld>{}</p:sld>"#,
         group_header(),
-        clr_map_ovr(ctx.presentation.theme.inverted, slide.inverted)
+        clr_map_ovr(slide.inverted)
     );
     Ok((xml, rels.list))
 }

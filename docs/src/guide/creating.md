@@ -61,10 +61,10 @@ A `Theme` holds the twelve colors, a title font and a body font. Five
 presets ship: `office` (the default), `dark`, `slate`, `forest` and
 `sunset`. Backgrounds are solid colors, linear gradients or pictures and
 apply to the master through the theme, to one layout, or to one slide.
-A dark background needs light text: the `dark` and `sunset` presets
-invert the color map for the whole deck, and `Slide::inverted` or the
-`inverted` argument of `Theme::layout_background` does it for one layout
-or slide relative to the theme.
+A dark background needs light text: the `dark` and `sunset` presets are
+inverted, which swaps the light and dark slots for the whole deck, and
+`Slide::inverted` or the `inverted` argument of `Theme::layout_background`
+swaps them again for one layout or slide.
 
 ```rust
 use pptxboss_write::{Background, Color, Layout, Presentation, Rgb, SchemeColor, Slide, Theme};
