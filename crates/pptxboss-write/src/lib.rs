@@ -10,6 +10,7 @@ use std::path::Path;
 
 mod markdown;
 mod parts;
+mod style;
 mod xml;
 mod zipw;
 

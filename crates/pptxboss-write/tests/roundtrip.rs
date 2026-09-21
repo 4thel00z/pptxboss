@@ -5,7 +5,8 @@ use pptxboss_check::{check_bytes, CheckOptions};
 use pptxboss_core::model::PlaceholderKind;
 use pptxboss_core::{Content, Document, TextOptions};
 use pptxboss_write::{
-    from_markdown, Layout, Metadata, Paragraph, Presentation, Rect, Slide, SlideSize,
+    from_markdown, Align, Color, Layout, Metadata, Paragraph, Presentation, Rect, Run, SchemeColor,
+    Slide, SlideSize,
 };
 
 const PNG: &[u8] = &[
@@ -237,4 +238,55 @@ fn files_are_written_to_disk() {
         Some("Disk")
     );
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn styled_runs_read_back() {
+    let url = "https://example.com/?a=1&b=2";
+    let deck = Presentation::new().slide(
+        Slide::titled("Runs")
+            .body_paragraph(
+                Paragraph::runs(vec![
+                    Run::text("Bold ").bold().underline().size(20),
+                    Run::text("italic ").italic().strike().font("Georgia"),
+                    Run::text("link").link(url),
+                    Run::text(" again").link(url),
+                ])
+                .space_after(12),
+            )
+            .text_box(
+                Rect::inches(1.0, 4.0, 4.0, 1.0),
+                vec![Paragraph::text("Centered")
+                    .align(Align::Center)
+                    .color(Color::Scheme(SchemeColor::Accent2))],
+            ),
+    );
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let slide = doc.slide(0).unwrap();
+    assert_eq!(slide.text(), "Runs\nBold italic link again\nCentered");
+    let runs = &slide.content.shapes[1].text_body().unwrap().paragraphs[0].runs;
+    assert_eq!(runs[0].props.bold, Some(true));
+    assert_eq!(runs[0].props.underline, Some(true));
+    assert_eq!(runs[0].props.size, Some(2000));
+    assert_eq!(runs[1].props.italic, Some(true));
+    assert_eq!(runs[1].props.strike, Some(true));
+    assert_eq!(runs[1].props.typeface.as_deref(), Some("Georgia"));
+    let link_id = runs[2].props.hyperlink.clone().unwrap();
+    assert_eq!(runs[3].props.hyperlink.as_deref(), Some(link_id.as_str()));
+    let rels = slide.rels().unwrap();
+    assert_eq!(rels.get(&link_id).unwrap().target, url);
+    let package = doc.package().unwrap();
+    let xml = String::from_utf8(
+        package
+            .read_part("/ppt/slides/slide1.xml")
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(xml.contains(r#"algn="ctr""#));
+    assert!(xml.contains(r#"<a:schemeClr val="accent2"/>"#));
+    assert!(xml.contains(r#"<a:spcAft><a:spcPts val="1200"/></a:spcAft>"#));
 }

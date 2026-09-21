@@ -1,9 +1,10 @@
 //! Serializes a [`Presentation`] into package parts (ECMA-376 Part 1,
 //! clauses 13, 19 and 21; Part 2, clauses 7 and 8).
 
+use crate::style::{ppr_xml, run_xml, ParagraphMode};
 use crate::xml::{attr, text, DECL};
 use crate::{
-    Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Run, Shape, Slide, SlideSize,
+    Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape, Slide, SlideSize,
 };
 
 const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
@@ -575,82 +576,63 @@ fn notes_xml(notes: &str) -> String {
     )
 }
 
-fn run_props(run: &Run) -> String {
-    let mut props = String::from(r#"<a:rPr lang="en-US""#);
-    if let Some(size) = run.size {
-        props.push_str(&format!(r#" sz="{}""#, size * 100));
-    }
-    if run.bold {
-        props.push_str(r#" b="1""#);
-    }
-    if run.italic {
-        props.push_str(r#" i="1""#);
-    }
-    props.push_str(r#" dirty="0"/>"#);
-    props
-}
-
-fn runs_xml(paragraph: &Paragraph) -> String {
-    if paragraph.runs.is_empty() {
-        return r#"<a:endParaRPr lang="en-US"/>"#.to_string();
-    }
-    paragraph
-        .runs
-        .iter()
-        .map(|run| {
-            format!(
-                "<a:r>{}<a:t>{}</a:t></a:r>",
-                run_props(run),
-                text(&run.text)
-            )
-        })
-        .collect()
-}
-
-/// Paragraphs for a body placeholder: bullets come from the master style,
-/// plain paragraphs switch bullets off.
-fn body_paragraphs(paragraphs: &[Paragraph]) -> String {
-    let mut xml = String::new();
-    for paragraph in paragraphs {
-        let ppr = match (paragraph.bullet, paragraph.level) {
-            (true, 0) => String::new(),
-            (true, level) => format!(r#"<a:pPr lvl="{level}"/>"#),
-            (false, level) => format!(
-                r#"<a:pPr marL="{}" lvl="{level}" indent="0"><a:buNone/></a:pPr>"#,
-                level as i64 * 457_200
-            ),
-        };
-        xml.push_str(&format!("<a:p>{ppr}{}</a:p>", runs_xml(paragraph)));
-    }
-    if xml.is_empty() {
-        xml.push_str(r#"<a:p><a:endParaRPr lang="en-US"/></a:p>"#);
-    }
-    xml
-}
-
-/// Paragraphs for a free text box: bullets are explicit.
-fn box_paragraphs(paragraphs: &[Paragraph]) -> String {
-    let mut xml = String::new();
-    for paragraph in paragraphs {
-        let ppr = match paragraph.bullet {
-            true => format!(
-                r#"<a:pPr marL="{}" lvl="{}" indent="-228600"><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/></a:pPr>"#,
-                228_600 + paragraph.level as i64 * 457_200,
-                paragraph.level
-            ),
-            false if paragraph.level > 0 => format!(r#"<a:pPr lvl="{}"/>"#, paragraph.level),
-            false => String::new(),
-        };
-        xml.push_str(&format!("<a:p>{ppr}{}</a:p>", runs_xml(paragraph)));
-    }
-    if xml.is_empty() {
-        xml.push_str(r#"<a:p><a:endParaRPr lang="en-US"/></a:p>"#);
-    }
-    xml
-}
-
 /// A relationship of a written part: id, type, target.
 type Rel = (String, String, String);
+
+/// Relationships of one part, ids handed out in order.
+struct Rels {
+    list: Vec<Rel>,
+    next: usize,
+}
+
+impl Rels {
+    fn new() -> Self {
+        Self {
+            list: Vec::new(),
+            next: 1,
+        }
+    }
+
+    fn add(&mut self, rel_type: &str, target: String) -> String {
+        let id = format!("rId{}", self.next);
+        self.next += 1;
+        self.list.push((id.clone(), rel_type.to_string(), target));
+        id
+    }
+
+    /// An external hyperlink relationship; one per distinct URL.
+    fn hyperlink(&mut self, url: &str) -> String {
+        let rel_type = format!("{REL}hyperlink");
+        if let Some((id, _, _)) = self
+            .list
+            .iter()
+            .find(|(_, kind, target)| *kind == rel_type && target == url)
+        {
+            return id.clone();
+        }
+        self.add(&rel_type, url.to_string())
+    }
+}
+
+fn paragraphs_xml(paragraphs: &[Paragraph], mode: ParagraphMode, rels: &mut Rels) -> String {
+    let mut xml = String::new();
+    for paragraph in paragraphs {
+        xml.push_str("<a:p>");
+        xml.push_str(&ppr_xml(paragraph, mode));
+        if paragraph.runs.is_empty() {
+            xml.push_str(r#"<a:endParaRPr lang="en-US"/>"#);
+        }
+        for run in &paragraph.runs {
+            let link = run.link.as_deref().map(|url| rels.hyperlink(url));
+            xml.push_str(&run_xml(run, link.as_deref()));
+        }
+        xml.push_str("</a:p>");
+    }
+    if xml.is_empty() {
+        xml.push_str(r#"<a:p><a:endParaRPr lang="en-US"/></a:p>"#);
+    }
+    xml
+}
 
 fn slide_xml(
     ctx: &mut Ctx<'_>,
@@ -659,19 +641,16 @@ fn slide_xml(
     frames: &Frames,
 ) -> Result<(String, Vec<Rel>)> {
     let layout = slide.effective_layout();
-    let mut rels = vec![(
-        "rId1".to_string(),
-        format!("{REL}slideLayout"),
+    let mut rels = Rels::new();
+    rels.add(
+        &format!("{REL}slideLayout"),
         format!("../slideLayouts/slideLayout{}.xml", layout.index()),
-    )];
-    let mut next_rel = 2;
+    );
     if slide.notes.is_some() {
-        rels.push((
-            format!("rId{next_rel}"),
-            format!("{REL}notesSlide"),
+        rels.add(
+            &format!("{REL}notesSlide"),
             format!("../notesSlides/notesSlide{n}.xml"),
-        ));
-        next_rel += 1;
+        );
     }
     let mut shapes = String::new();
     let mut next_id = 2u32;
@@ -722,14 +701,14 @@ fn slide_xml(
             r#"<p:ph idx="1"/>"#,
             rect,
             PLAIN_BODY_PR,
-            &body_paragraphs(&slide.body),
+            &paragraphs_xml(&slide.body, ParagraphMode::Body, &mut rels),
         ));
         next_id += 1;
     }
     for shape in &slide.shapes {
         match shape {
             Shape::Text { paragraphs, rect } => {
-                shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), box_paragraphs(paragraphs)));
+                shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), paragraphs_xml(paragraphs, ParagraphMode::Box, &mut rels)));
                 next_id += 1;
             }
             Shape::Picture(picture) => {
@@ -741,13 +720,10 @@ fn slide_xml(
                     format.extension()
                 );
                 ctx.media.push((media_name.clone(), format));
-                let rel_id = format!("rId{next_rel}");
-                next_rel += 1;
-                rels.push((
-                    rel_id.clone(),
-                    format!("{REL}image"),
+                let rel_id = rels.add(
+                    &format!("{REL}image"),
                     format!("../media/image{}.{}", ctx.media.len(), format.extension()),
-                ));
+                );
                 let descr = picture
                     .description
                     .as_deref()
@@ -804,7 +780,7 @@ fn slide_xml(
         r#"{DECL}<p:sld xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"{show}><p:cSld><p:spTree>{}{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#,
         group_header()
     );
-    Ok((xml, rels))
+    Ok((xml, rels.list))
 }
 
 fn theme_xml(font: &str) -> String {
