@@ -793,7 +793,10 @@ impl Default for Theme {
 }
 
 impl Theme {
-    pub const PRESETS: [&'static str; 5] = ["office", "dark", "slate", "forest", "sunset"];
+    pub const PRESETS: [&'static str; 12] = [
+        "office", "dark", "slate", "forest", "sunset", "midnight", "mocha", "dracula", "nord",
+        "tokyo", "clay", "mono",
+    ];
 
     /// Office colors, Calibri, not inverted, no backgrounds.
     pub fn new(name: impl Into<String>) -> Self {
@@ -852,6 +855,74 @@ impl Theme {
             ))
     }
 
+    /// Near-black with an emerald accent, in the style of developer tool sites.
+    pub fn midnight() -> Self {
+        Self::new("midnight")
+            .colors(ColorScheme::from_hex_table([
+                0x0A0A0A, 0xFAFAFA, 0x141417, 0x9AA0A6, 0x34D399, 0x60A5FA, 0xFBBF24, 0xF87171,
+                0xA78BFA, 0x2DD4BF, 0x34D399, 0x6EE7B7,
+            ]))
+            .inverted()
+    }
+
+    /// The Catppuccin Mocha palette: soft dark blue with mauve and blue accents.
+    pub fn mocha() -> Self {
+        Self::new("mocha")
+            .colors(ColorScheme::from_hex_table([
+                0x1E1E2E, 0xCDD6F4, 0x313244, 0xA6ADC8, 0xCBA6F7, 0x89B4FA, 0xA6E3A1, 0xFAB387,
+                0xF38BA8, 0x94E2D5, 0x89B4FA, 0xB4BEFE,
+            ]))
+            .inverted()
+    }
+
+    /// The Dracula palette: dark grey with purple, pink and cyan accents.
+    pub fn dracula() -> Self {
+        Self::new("dracula")
+            .colors(ColorScheme::from_hex_table([
+                0x282A36, 0xF8F8F2, 0x44475A, 0x6272A4, 0xBD93F9, 0xFF79C6, 0x8BE9FD, 0x50FA7B,
+                0xFFB86C, 0xFF5555, 0x8BE9FD, 0xBD93F9,
+            ]))
+            .inverted()
+    }
+
+    /// The Nord palette: blue-grey with frost and aurora accents.
+    pub fn nord() -> Self {
+        Self::new("nord")
+            .colors(ColorScheme::from_hex_table([
+                0x2E3440, 0xECEFF4, 0x3B4252, 0xD8DEE9, 0x88C0D0, 0x81A1C1, 0xA3BE8C, 0xEBCB8B,
+                0xD08770, 0xB48EAD, 0x88C0D0, 0x5E81AC,
+            ]))
+            .inverted()
+    }
+
+    /// The Tokyo Night palette: deep navy with blue and violet accents.
+    pub fn tokyo() -> Self {
+        Self::new("tokyo")
+            .colors(ColorScheme::from_hex_table([
+                0x1A1B26, 0xC0CAF5, 0x24283B, 0xA9B1D6, 0x7AA2F7, 0xBB9AF7, 0x7DCFFF, 0x9ECE6A,
+                0xFF9E64, 0xF7768E, 0x7AA2F7, 0xBB9AF7,
+            ]))
+            .inverted()
+    }
+
+    /// Warm cream with ink text and a terracotta accent; serif titles.
+    pub fn clay() -> Self {
+        Self::new("clay")
+            .colors(ColorScheme::from_hex_table([
+                0x141413, 0xFAF9F5, 0x5E5D59, 0xF0EEE6, 0xD97757, 0x6A9BCC, 0x788C5D, 0xC2A34E,
+                0x8B6BB5, 0x5B8C7D, 0x6A9BCC, 0x8B6BB5,
+            ]))
+            .fonts("Georgia", "Calibri")
+    }
+
+    /// White with near-black text and one blue accent.
+    pub fn mono() -> Self {
+        Self::new("mono").colors(ColorScheme::from_hex_table([
+            0x0A0A0A, 0xFFFFFF, 0x666666, 0xEAEAEA, 0x0070F3, 0x7928CA, 0xFF0080, 0xF5A623,
+            0x50E3C2, 0xEE0000, 0x0070F3, 0x7928CA,
+        ]))
+    }
+
     /// A preset by name; see [`Theme::PRESETS`].
     pub fn preset(name: &str) -> Option<Theme> {
         match name {
@@ -860,6 +931,13 @@ impl Theme {
             "slate" => Some(Self::slate()),
             "forest" => Some(Self::forest()),
             "sunset" => Some(Self::sunset()),
+            "midnight" => Some(Self::midnight()),
+            "mocha" => Some(Self::mocha()),
+            "dracula" => Some(Self::dracula()),
+            "nord" => Some(Self::nord()),
+            "tokyo" => Some(Self::tokyo()),
+            "clay" => Some(Self::clay()),
+            "mono" => Some(Self::mono()),
             _ => None,
         }
     }
@@ -1150,6 +1228,12 @@ mod tests {
         assert!(Theme::preset("nope").is_none());
         for name in Theme::PRESETS {
             assert_eq!(Theme::preset(name).unwrap().name, name);
+        }
+        for name in ["midnight", "mocha", "dracula", "nord", "tokyo"] {
+            assert!(Theme::preset(name).unwrap().inverted, "{name} is dark");
+        }
+        for name in ["clay", "mono", "slate", "forest"] {
+            assert!(!Theme::preset(name).unwrap().inverted, "{name} is light");
         }
         let theme = Theme::new("mine")
             .color(SchemeColor::Accent1, Rgb::new(1, 2, 3))
