@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/4thel00z/pptxboss/compare/v1.1.0...v2.0.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **write:** layout engine: blocks, columns, fitting and continuation slides ([#12](https://github.com/4thel00z/pptxboss/issues/12))
+
+### Features
+
+* **write:** layout engine: blocks, columns, fitting and continuation slides ([#12](https://github.com/4thel00z/pptxboss/issues/12)) ([a8cd3f6](https://github.com/4thel00z/pptxboss/commit/a8cd3f6201d5d113242ccc439cb6b9d963cf99c3))
+
 ## [1.1.0](https://github.com/4thel00z/pptxboss/compare/v1.0.0...v1.1.0) (2026-09-21)
 
 
