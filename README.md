@@ -173,18 +173,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Create decks
 
 ```rust
-use pptxboss_write::{Presentation, Rect, Slide, Theme};
+use pptxboss_write::{Block, Presentation, Slide, Theme};
 
 let deck = Presentation::new()
     .theme(Theme::slate())
     .slide(Slide::title_slide("Quarterly review", Some("Q3 2026")))
     .slide(Slide::titled("Highlights").bullet("Revenue up").sub_bullet("in every region", 1).notes("Pause here"))
-    .slide(Slide::titled("Numbers").table(Rect::inches(1.0, 1.8, 11.0, 2.0), vec![vec!["Region".into(), "Growth".into()], vec!["EMEA".into(), "12%".into()]], true));
+    .slide(Slide::titled("Numbers").columns(vec![
+        Block::bullets(["EMEA grew fastest", "APAC flat"]),
+        Block::table(vec![vec!["Region".into(), "Growth".into()], vec!["EMEA".into(), "12%".into()]], true),
+    ]));
 deck.write_to("review.pptx")?;
 ```
 
-Output is deterministic (fixed timestamps, fixed part order), reads back
-through `pptxboss-core`, and passes `pptxboss check` with no findings.
+Content without coordinates is placed by the layout engine: it measures
+text with embedded font metrics, stacks blocks or sets them in columns,
+shrinks body text to the theme's minimum when a slide is full, and
+continues what is left on the next slide. Output is deterministic (fixed
+timestamps, fixed part order), reads back through `pptxboss-core`, and
+passes `pptxboss check` with no findings.
 
 ## Benchmarks
 

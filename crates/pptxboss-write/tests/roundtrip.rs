@@ -5,8 +5,8 @@ use pptxboss_check::{check_bytes, CheckOptions};
 use pptxboss_core::model::PlaceholderKind;
 use pptxboss_core::{Content, Document, TextOptions};
 use pptxboss_write::{
-    from_markdown, Align, Background, Color, Layout, Metadata, Paragraph, Presentation, Rect, Run,
-    SchemeColor, Slide, SlideSize, Theme,
+    from_markdown, Align, Background, Block, Color, Layout, Metadata, Paragraph, Presentation,
+    Rect, Run, SchemeColor, Slide, SlideSize, Theme,
 };
 
 const PNG: &[u8] = &[
@@ -393,4 +393,62 @@ fn bad_background_is_an_error() {
         deck.to_bytes(),
         Err(pptxboss_write::Error::UnsupportedBackgroundImage)
     ));
+}
+
+#[test]
+fn placed_content_verifies_clean_and_continues() {
+    let mut agenda = Slide::titled("Agenda").notes("first only");
+    for i in 0..30 {
+        agenda = agenda.bullet(format!("Item {i}: something that takes a line"));
+    }
+    let mut rows = vec![vec!["Name".to_string(), "Value".to_string()]];
+    rows.extend((0..30).map(|i| vec![format!("row {i}"), i.to_string()]));
+    let deck = Presentation::new()
+        .slide(agenda)
+        .slide(
+            Slide::titled("Side by side")
+                .columns(vec![
+                    Block::bullets(["left one", "left two"]),
+                    Block::picture_described(PNG.to_vec(), "a red dot"),
+                ])
+                .block(Block::table(
+                    vec![vec!["a".into(), "b".into()], vec!["1".into(), "2".into()]],
+                    true,
+                )),
+        )
+        .slide(Slide::titled("Long table").block(Block::table(rows, true)))
+        .slide(Slide::new().block(Block::picture(PNG.to_vec())));
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+
+    let doc = Document::load(bytes).unwrap();
+    assert!(doc.slide_count() > 4, "{} slides", doc.slide_count());
+    let first = doc.slide(0).unwrap();
+    assert!(first.text().starts_with("Agenda\nItem 0:"));
+    assert_eq!(first.notes_text().unwrap().as_deref(), Some("first only"));
+    let second = doc.slide(1).unwrap();
+    assert_eq!(second.title().as_deref(), Some("Agenda"));
+    assert!(second.notes_text().unwrap().is_none());
+    let mut all_text = String::new();
+    for i in 0..doc.slide_count() {
+        all_text.push_str(&doc.slide(i).unwrap().text());
+        all_text.push('\n');
+    }
+    for i in 0..30 {
+        assert!(all_text.contains(&format!("Item {i}:")), "item {i}");
+        assert!(all_text.contains(&format!("row {i}\t{i}")), "row {i}");
+    }
+    assert!(all_text.contains("left one\nleft two\na\tb\n1\t2"));
+    assert_eq!(
+        all_text.matches("Name\tValue").count(),
+        all_text.matches("Long table").count()
+    );
+    assert!(doc
+        .slide(doc.slide_count() - 1)
+        .unwrap()
+        .content
+        .shapes
+        .iter()
+        .any(|shape| matches!(shape.content, Content::Picture(_))));
 }

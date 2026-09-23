@@ -52,7 +52,9 @@ unless asked. Text is never inherited from layouts or masters.
 Markdown for `create md`: `#` starts a title slide and the next paragraph
 is its subtitle; `##` or `###` starts a content slide; `-`, `*`, `+`, `1.`
 lines are bullets and indentation sets the level; `Notes:` starts speaker
-notes; `---` starts an untitled slide; other lines are body paragraphs.
+notes; `---` starts an untitled slide; other lines are body paragraphs. A
+slide with more bullets than fit shrinks them to the theme's minimum size
+and continues on the next slide with the same title.
 
 ## Python
 

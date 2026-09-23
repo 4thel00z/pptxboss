@@ -15,8 +15,8 @@ def build() -> write.Presentation:
     deck.add(
         write.Slide("Shapes")
         .text_box(1.0, 1.5, 4.0, 1.0, ["Free text"], bold=True, size=28)
-        .table(1.0, 3.0, 6.0, 1.5, [["Name", "Value"], ["Answer", "42"]])
-        .picture(PNG, 8.0, 1.5, 1.0, 1.0, description="a dot")
+        .table([["Name", "Value"], ["Answer", "42"]], x=1.0, y=3.0, w=6.0, h=1.5)
+        .picture(PNG, x=8.0, y=1.5, w=1.0, h=1.0, description="a dot")
     )
     deck.add(write.Slide(layout="blank", hidden=True))
     return deck
@@ -53,12 +53,14 @@ def test_markdown_and_errors() -> None:
         write.Presentation(size="huge")
     with pytest.raises(ValueError):
         write.Slide("x", layout="fancy")
-    ragged = write.Presentation().add(write.Slide("t").table(1, 1, 2, 1, [["a", "b"], ["c"]]))
+    ragged = write.Presentation().add(write.Slide("t").table([["a", "b"], ["c"]], x=1, y=1, w=2, h=1))
     with pytest.raises(pptxboss.PptxError, match="cells"):
         ragged.to_bytes()
-    svg = write.Presentation().add(write.Slide("t").picture(b"<svg/>", 1, 1, 1, 1))
+    svg = write.Presentation().add(write.Slide("t").picture(b"<svg/>", x=1, y=1, w=1, h=1))
     with pytest.raises(pptxboss.PptxError, match="image"):
         svg.to_bytes()
+    with pytest.raises(ValueError, match="x, y, w and h"):
+        write.Slide("t").picture(PNG, x=1.0)
     assert repr(write.Slide("t")).startswith("write.Slide(")
 
 
@@ -145,3 +147,39 @@ def test_runs_theme_and_background() -> None:
         write.Theme("x", colors={"neon": "#000000"})
     with pytest.raises(pptxboss.PptxError, match="background"):
         write.Presentation(theme=write.Theme("x", background=write.Background.picture(b"<svg/>"))).to_bytes()
+
+
+def test_layout_engine_places_blocks_and_continues() -> None:
+    rows = [["Name", "Value"]] + [[f"row {i}", str(i)] for i in range(30)]
+    agenda = write.Slide("Agenda", notes="first only")
+    for i in range(30):
+        agenda.bullet(f"Item {i}: something that takes a line")
+    deck = write.Presentation(theme=write.Theme("mine", sizes={"body": 24, "minimum": 16}))
+    deck.add(agenda)
+    deck.add(
+        write.Slide("Side by side")
+        .columns(["left one", write.Paragraph("left two", italic=True)], write.Picture(PNG, description="a dot"))
+        .block(write.Table([["a", "b"], ["1", "2"]]))
+    )
+    deck.add(write.Slide("Long table").table(rows))
+    deck.add(write.Slide().picture(PNG))
+    assert deck.slide_count == 4
+    data = deck.to_bytes()
+    assert pptxboss.check(data=data) == []
+    doc = pptxboss.Document(data=data)
+    assert doc.slide_count > 4
+    assert doc[0].notes() == "first only" and doc[1].notes() is None
+    assert doc[1].title == "Agenda"
+    text = doc.text()
+    assert all(f"Item {i}:" in text for i in range(30))
+    assert all(f"row {i}\t{i}" in text for i in range(30))
+    assert "left one\nleft two\na\tb\n1\t2" in text
+    assert text.count("Name\tValue") == text.count("Long table")
+    assert doc[-1].images()
+    theme = write.Theme("mine", sizes={"body": 24, "minimum": 16})
+    assert theme.sizes["body"] == 24 and theme.sizes["title"] == 44
+    with pytest.raises(ValueError, match="size"):
+        write.Theme("x", sizes={"huge": 1})
+    with pytest.raises(ValueError, match="at least one"):
+        write.Slide("t").columns()
+    assert repr(write.Picture(PNG)).startswith("write.Picture(") and repr(write.Table(rows)) == "write.Table(31 rows)"

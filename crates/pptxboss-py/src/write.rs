@@ -1,8 +1,9 @@
 //! The `pptxboss.write` submodule: build decks from Python.
 //!
 //! `Presentation` and `Slide` are mutable builders; coordinates are given
-//! in inches, colors as `#RRGGBB` or a theme slot name. `to_bytes()` and
-//! `save()` release the GIL while serializing.
+//! in inches, colors as `#RRGGBB` or a theme slot name. Content without
+//! coordinates is placed by the layout engine. `to_bytes()` and `save()`
+//! release the GIL while serializing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,9 +13,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use pptxboss_write::{
-    Align, Background as CoreBackground, Color, GradientStop, Layout, Metadata,
+    Align, Background as CoreBackground, Block, Color, GradientStop, Layout, Metadata,
     Paragraph as CoreParagraph, Presentation as CorePresentation, Rect, Rgb, Run as CoreRun,
-    SchemeColor, Slide as CoreSlide, SlideSize, Theme as CoreTheme,
+    SchemeColor, Slide as CoreSlide, SlideSize, Theme as CoreTheme, TypeScale,
 };
 
 use crate::pptx_err;
@@ -403,9 +404,41 @@ impl Background {
     }
 }
 
-/// Colors, fonts and backgrounds shared by every slide. `colors` maps slot
-/// names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink,
-/// followed_hyperlink) to `#RRGGBB`.
+const SIZE_NAMES: [&str; 6] = ["display", "title", "subtitle", "body", "table", "minimum"];
+
+fn scale_from(sizes: HashMap<String, u32>) -> PyResult<TypeScale> {
+    let mut scale = TypeScale::default();
+    let mut sizes: Vec<(String, u32)> = sizes.into_iter().collect();
+    sizes.sort();
+    for (name, points) in sizes {
+        let slot = match name.as_str() {
+            "display" => &mut scale.display,
+            "title" => &mut scale.title,
+            "subtitle" => &mut scale.subtitle,
+            "body" => &mut scale.body,
+            "table" => &mut scale.table,
+            "minimum" => &mut scale.minimum,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown size {other:?}; use one of {}",
+                    SIZE_NAMES.join(", ")
+                )))
+            }
+        };
+        if points == 0 {
+            return Err(PyValueError::new_err(format!(
+                "size {name:?} must be positive"
+            )));
+        }
+        *slot = points;
+    }
+    Ok(scale)
+}
+
+/// Colors, fonts, type scale and backgrounds shared by every slide.
+/// `colors` maps slot names (dark1, light1, dark2, light2, accent1 to
+/// accent6, hyperlink, followed_hyperlink) to `#RRGGBB`; `sizes` maps
+/// display, title, subtitle, body, table and minimum to points.
 #[pyclass(module = "pptxboss.write")]
 #[derive(Clone)]
 pub struct Theme {
@@ -415,7 +448,7 @@ pub struct Theme {
 #[pymethods]
 impl Theme {
     #[new]
-    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, inverted=false, background=None))]
+    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, sizes=None, inverted=false, background=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         name: &str,
@@ -423,10 +456,14 @@ impl Theme {
         major_font: Option<String>,
         minor_font: Option<String>,
         font: Option<String>,
+        sizes: Option<HashMap<String, u32>>,
         inverted: bool,
         background: Option<Background>,
     ) -> PyResult<Self> {
         let mut inner = CoreTheme::new(name);
+        if let Some(sizes) = sizes {
+            inner = inner.scale(scale_from(sizes)?);
+        }
         let mut colors: Vec<(String, String)> = colors.unwrap_or_default().into_iter().collect();
         colors.sort();
         for (slot, value) in colors {
@@ -456,7 +493,7 @@ impl Theme {
         Ok(Self { inner })
     }
 
-    /// A preset: office, dark, slate, forest or sunset.
+    /// A preset by name; see `presets()`.
     #[staticmethod]
     fn preset(name: &str) -> PyResult<Self> {
         CoreTheme::preset(name)
@@ -522,8 +559,135 @@ impl Theme {
             .collect()
     }
 
+    /// Font sizes in points by name.
+    #[getter]
+    fn sizes(&self) -> HashMap<String, u32> {
+        let scale = self.inner.scale;
+        SIZE_NAMES
+            .iter()
+            .zip([
+                scale.display,
+                scale.title,
+                scale.subtitle,
+                scale.body,
+                scale.table,
+                scale.minimum,
+            ])
+            .map(|(name, points)| (name.to_string(), points))
+            .collect()
+    }
+
     fn __repr__(&self) -> String {
         format!("write.Theme({:?})", self.inner.name)
+    }
+}
+
+/// A picture (PNG, JPEG, GIF, BMP or TIFF bytes) for the layout engine to
+/// place; it keeps its aspect ratio.
+#[pyclass(module = "pptxboss.write")]
+#[derive(Clone)]
+pub struct Picture {
+    data: Vec<u8>,
+    description: Option<String>,
+}
+
+#[pymethods]
+impl Picture {
+    #[new]
+    #[pyo3(signature = (data, *, description=None))]
+    fn new(data: Vec<u8>, description: Option<String>) -> Self {
+        Self { data, description }
+    }
+
+    #[getter]
+    fn description(&self) -> Option<String> {
+        self.description.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("write.Picture({} bytes)", self.data.len())
+    }
+}
+
+/// A table of cell texts for the layout engine to place; rows take the
+/// height their cells need, and a long table continues on the next slide
+/// with its header.
+#[pyclass(module = "pptxboss.write")]
+#[derive(Clone)]
+pub struct Table {
+    rows: Vec<Vec<String>>,
+    header: bool,
+}
+
+#[pymethods]
+impl Table {
+    #[new]
+    #[pyo3(signature = (rows, *, header=true))]
+    fn new(rows: Vec<Vec<String>>, header: bool) -> Self {
+        Self { rows, header }
+    }
+
+    #[getter]
+    fn rows(&self) -> Vec<Vec<String>> {
+        self.rows.clone()
+    }
+
+    #[getter]
+    fn header(&self) -> bool {
+        self.header
+    }
+
+    fn __repr__(&self) -> String {
+        format!("write.Table({} rows)", self.rows.len())
+    }
+}
+
+/// A block for the layout engine: lines of text (strings become bullets,
+/// a `Paragraph` keeps its own formatting), a `Picture`, a `Table`, or a
+/// list of blocks set side by side.
+#[derive(FromPyObject)]
+enum BlockArg {
+    Picture(Picture),
+    Table(Table),
+    Lines(Vec<Line>),
+    Columns(Vec<BlockArg>),
+}
+
+fn block_from(block: BlockArg) -> Block {
+    match block {
+        BlockArg::Picture(picture) => Block::Picture {
+            data: picture.data,
+            description: picture.description,
+        },
+        BlockArg::Table(table) => Block::table(table.rows, table.header),
+        BlockArg::Lines(lines) => Block::text(
+            lines
+                .into_iter()
+                .map(|line| match line {
+                    Line::Paragraph(paragraph) => paragraph.inner,
+                    Line::Text(text) => CoreParagraph::bullet(text, 0),
+                })
+                .collect(),
+        ),
+        BlockArg::Columns(children) => {
+            Block::columns(children.into_iter().map(block_from).collect())
+        }
+    }
+}
+
+/// A rectangle from four optional inch coordinates: all given, or none.
+fn rect_from(
+    x: Option<f64>,
+    y: Option<f64>,
+    w: Option<f64>,
+    h: Option<f64>,
+) -> PyResult<Option<Rect>> {
+    match (x, y, w, h) {
+        (Some(x), Some(y), Some(w), Some(h)) => Ok(Some(Rect::inches(x, y, w, h))),
+        (None, None, None, None) => Ok(None),
+        _ => Err(PyValueError::new_err(
+            "give x, y, w and h together for a fixed position, or none of them to let the layout engine place it",
+        )),
     }
 }
 
@@ -665,39 +829,73 @@ impl Slide {
     }
 
     /// Adds a table of cell texts; every row must have the same length.
-    #[pyo3(signature = (x, y, w, h, rows, *, header=true))]
-    fn table(
-        mut slf: PyRefMut<'_, Self>,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
+    /// With `x`, `y`, `w` and `h` in inches it sits at that position;
+    /// without them the layout engine places it below the body.
+    #[pyo3(signature = (rows, *, header=true, x=None, y=None, w=None, h=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn table<'py>(
+        mut slf: PyRefMut<'py, Self>,
         rows: Vec<Vec<String>>,
         header: bool,
-    ) -> PyRefMut<'_, Self> {
-        slf.inner = std::mem::take(&mut slf.inner).table(Rect::inches(x, y, w, h), rows, header);
+        x: Option<f64>,
+        y: Option<f64>,
+        w: Option<f64>,
+        h: Option<f64>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        slf.inner = match rect_from(x, y, w, h)? {
+            Some(rect) => std::mem::take(&mut slf.inner).table(rect, rows, header),
+            None => std::mem::take(&mut slf.inner).block(Block::table(rows, header)),
+        };
+        Ok(slf)
+    }
+
+    /// Adds a picture (PNG, JPEG, GIF, BMP or TIFF bytes). With `x`, `y`,
+    /// `w` and `h` in inches it fills that box; without them the layout
+    /// engine places it below the body at its own aspect ratio.
+    #[pyo3(signature = (data, *, x=None, y=None, w=None, h=None, description=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn picture<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        data: Vec<u8>,
+        x: Option<f64>,
+        y: Option<f64>,
+        w: Option<f64>,
+        h: Option<f64>,
+        description: Option<String>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        let inner = std::mem::take(&mut slf.inner);
+        slf.inner = match (rect_from(x, y, w, h)?, description) {
+            (Some(rect), Some(description)) => inner.picture_described(data, rect, description),
+            (Some(rect), None) => inner.picture(data, rect),
+            (None, description) => inner.block(Block::Picture { data, description }),
+        };
+        Ok(slf)
+    }
+
+    /// Adds a block below the body for the layout engine to place: a list
+    /// of lines (strings become bullets, a `Paragraph` keeps its
+    /// formatting), a `Picture`, a `Table`, or a list of those set side by
+    /// side.
+    fn block<'py>(mut slf: PyRefMut<'py, Self>, block: BlockArg) -> PyRefMut<'py, Self> {
+        slf.inner.blocks.push(block_from(block));
         slf
     }
 
-    /// Adds a picture (PNG, JPEG, GIF, BMP or TIFF bytes).
-    #[pyo3(signature = (data, x, y, w, h, *, description=None))]
-    fn picture(
-        mut slf: PyRefMut<'_, Self>,
-        data: Vec<u8>,
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        description: Option<String>,
-    ) -> PyRefMut<'_, Self> {
-        let rect = Rect::inches(x, y, w, h);
-        slf.inner = match description {
-            Some(description) => {
-                std::mem::take(&mut slf.inner).picture_described(data, rect, description)
-            }
-            None => std::mem::take(&mut slf.inner).picture(data, rect),
-        };
-        slf
+    /// Adds blocks side by side; two blocks of which one is a picture
+    /// split seven to five in the text's favor, otherwise columns are
+    /// equal.
+    #[pyo3(signature = (*columns))]
+    fn columns<'py>(
+        mut slf: PyRefMut<'py, Self>,
+        columns: Vec<BlockArg>,
+    ) -> PyResult<PyRefMut<'py, Self>> {
+        if columns.is_empty() {
+            return Err(PyValueError::new_err("columns needs at least one block"));
+        }
+        slf.inner.blocks.push(Block::columns(
+            columns.into_iter().map(block_from).collect(),
+        ));
+        Ok(slf)
     }
 
     #[getter]
@@ -712,9 +910,10 @@ impl Slide {
 
     fn __repr__(&self) -> String {
         format!(
-            "write.Slide(title={:?}, body={}, shapes={})",
+            "write.Slide(title={:?}, body={}, blocks={}, shapes={})",
             self.inner.title,
             self.inner.body.len(),
+            self.inner.blocks.len(),
             self.inner.shapes.len()
         )
     }
@@ -832,6 +1031,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Run>()?;
     module.add_class::<Theme>()?;
     module.add_class::<Background>()?;
+    module.add_class::<Picture>()?;
+    module.add_class::<Table>()?;
     module.add_function(wrap_pyfunction!(from_markdown, &module)?)?;
     parent.add_submodule(&module)?;
     py.import("sys")?

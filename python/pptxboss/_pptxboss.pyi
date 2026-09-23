@@ -532,7 +532,7 @@ class write:
         def picture(data: bytes) -> write.Background: ...
 
     class Theme:
-        """Colors, fonts and backgrounds shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB."""
+        """Colors, fonts, type scale and backgrounds shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB; sizes maps display, title, subtitle, body, table and minimum to points."""
 
         def __init__(
             self,
@@ -542,12 +542,13 @@ class write:
             major_font: str | None = None,
             minor_font: str | None = None,
             font: str | None = None,
+            sizes: dict[str, int] | None = None,
             inverted: bool = False,
             background: write.Background | None = None,
         ) -> None: ...
         @staticmethod
         def preset(name: str) -> write.Theme:
-            """One of office, dark, slate, forest or sunset."""
+            """A preset by name; see presets()."""
         @staticmethod
         def presets() -> list[str]: ...
         def layout_background(self, layout: str, background: write.Background, *, inverted: bool = False) -> write.Theme: ...
@@ -561,9 +562,30 @@ class write:
         def inverted(self) -> bool: ...
         @property
         def colors(self) -> dict[str, str]: ...
+        @property
+        def sizes(self) -> dict[str, int]: ...
+
+    class Picture:
+        """A picture (PNG, JPEG, GIF, BMP or TIFF bytes) for the layout engine to place; it keeps its aspect ratio."""
+
+        def __init__(self, data: bytes, *, description: str | None = None) -> None: ...
+        @property
+        def description(self) -> str | None: ...
+
+    class Table:
+        """A table of cell texts for the layout engine to place; a long table continues on the next slide with its header."""
+
+        def __init__(self, rows: list[list[str]], *, header: bool = True) -> None: ...
+        @property
+        def rows(self) -> list[list[str]]: ...
+        @property
+        def header(self) -> bool: ...
+
+    Block = list[str | write.Paragraph] | write.Picture | write.Table | list["write.Block"]
+    """A block for the layout engine: lines of text (strings become bullets), a Picture, a Table, or a list of blocks side by side."""
 
     class Slide:
-        """One slide under construction; coordinates are inches."""
+        """One slide under construction; coordinates are inches, and content given without them is placed by the layout engine."""
 
         def __init__(
             self,
@@ -579,8 +601,14 @@ class write:
         def bullet(self, text: str | list[str | write.Run], level: int = 0, *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...
         def paragraph(self, text: str | list[str | write.Run], *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None, align: str = "left") -> write.Slide: ...
         def text_box(self, x: float, y: float, w: float, h: float, lines: list[str | write.Paragraph], *, bullets: bool = False, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...
-        def table(self, x: float, y: float, w: float, h: float, rows: list[list[str]], *, header: bool = True) -> write.Slide: ...
-        def picture(self, data: bytes, x: float, y: float, w: float, h: float, *, description: str | None = None) -> write.Slide: ...
+        def table(self, rows: list[list[str]], *, header: bool = True, x: float | None = None, y: float | None = None, w: float | None = None, h: float | None = None) -> write.Slide:
+            """With x, y, w and h the table sits at that position; without them the layout engine places it below the body."""
+        def picture(self, data: bytes, *, x: float | None = None, y: float | None = None, w: float | None = None, h: float | None = None, description: str | None = None) -> write.Slide:
+            """With x, y, w and h the picture fills that box; without them the layout engine places it at its own aspect ratio."""
+        def block(self, block: write.Block) -> write.Slide:
+            """Adds a block below the body for the layout engine to place."""
+        def columns(self, *columns: write.Block) -> write.Slide:
+            """Adds blocks side by side; two blocks of which one is a picture split seven to five in the text's favor, otherwise columns are equal."""
         @property
         def title(self) -> str | None: ...
         @property
