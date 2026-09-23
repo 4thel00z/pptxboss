@@ -90,16 +90,17 @@ fn push_s255(out: &mut Vec<u8>, value: i16) {
 }
 
 /// The triplet index and trailing bytes for one point's deltas: the
-/// smallest encoding whose ranges hold both values.
+/// smallest encoding whose ranges hold both values, with a zero delta
+/// counted as positive, as PowerPoint encodes it.
 fn triplet(dx: i16, dy: i16) -> (u8, Vec<u8>) {
     let (ax, ay) = (dx.unsigned_abs() as u32, dy.unsigned_abs() as u32);
-    let signs = u8::from(dx > 0) | (u8::from(dy > 0) << 1);
-    if dx == 0 && dy != 0 && ay < 1280 {
-        let index = (2 * (ay / 256)) as u8 | u8::from(dy > 0);
+    let signs = u8::from(dx >= 0) | (u8::from(dy >= 0) << 1);
+    if dx == 0 && ay < 1280 {
+        let index = (2 * (ay / 256)) as u8 | u8::from(dy >= 0);
         return (index, vec![(ay % 256) as u8]);
     }
     if dy == 0 && dx != 0 && ax < 1280 {
-        let index = (10 + 2 * (ax / 256)) as u8 | u8::from(dx > 0);
+        let index = (10 + 2 * (ax / 256)) as u8 | u8::from(dx >= 0);
         return (index, vec![(ax % 256) as u8]);
     }
     if dx != 0 && dy != 0 && ax <= 64 && ay <= 64 {
@@ -982,7 +983,7 @@ mod tests {
         assert_eq!(triplet(3, -3).1.len(), 1);
         assert_eq!(triplet(300, 1).1.len(), 2);
         assert_eq!(triplet(3000, 1).1.len(), 3);
-        assert_eq!(triplet(0, 0).1.len(), 3);
+        assert_eq!(triplet(0, 0), (1, vec![0]));
         assert_eq!(triplet(5000, 1).1.len(), 4);
     }
 
