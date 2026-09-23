@@ -51,7 +51,10 @@ scale steps down, never below the theme's minimum size; what still does
 not fit continues on the next slide with the same title, background and
 layout, split evenly over the slides it needs. A table carries its header
 row onto every continuation. A title that does not fit its frame shrinks
-on its own. Body text that fits at full size is written exactly as before.
+on its own. Body text that fits at full size on a titled slide is written
+exactly as before; a slide without a title places its body from the top
+margin, and bullets in free text boxes take the first accent color like
+the body's.
 
 ```rust
 use pptxboss_write::{Block, Slide};
