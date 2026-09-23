@@ -494,11 +494,13 @@ fn embedded_fonts_are_stored_as_eot_parts() {
         Some("application/x-fontdata")
     );
     let font1 = package.read_part("/ppt/fonts/font1.fntdata").unwrap();
-    assert!(font1.ends_with(&regular));
-    assert_eq!(
-        u32::from_le_bytes(font1[8..12].try_into().unwrap()),
-        0x0002_0002
-    );
+    let le32 = |at: usize| u32::from_le_bytes(font1[at..at + 4].try_into().unwrap());
+    assert_eq!(le32(0) as usize, font1.len());
+    assert_eq!(le32(8), 0x0002_0002);
+    assert_eq!(le32(12), 4, "font data is MicroType Express compressed");
+    let body = &font1[font1.len() - le32(4) as usize..];
+    assert_eq!(body[0], 3);
+    assert!(body.len() < regular.len());
 
     let restricted = Presentation::new().theme(Theme::office().embed_font(b"<svg/>".to_vec()));
     assert!(matches!(

@@ -1,10 +1,17 @@
 //! Font embedding. Reads the tables of a TrueType or OpenType font that
 //! name and describe it, and wraps the file as Embedded OpenType (EOT)
 //! version 2.2, the container PowerPoint stores under `ppt/fonts`. The
-//! font data is carried uncompressed; the header fields come from the
-//! `OS/2`, `head` and `name` tables.
+//! font data is MicroType Express compressed, as PowerPoint writes it; a
+//! font the coder cannot handle is carried as it is. The header fields
+//! come from the `OS/2`, `head` and `name` tables.
 
+use std::borrow::Cow;
+
+use crate::mtx;
 use crate::{Error, Result};
+
+/// The EOT flag for MicroType Express compressed font data.
+const COMPRESSED: u32 = 0x0000_0004;
 
 /// What the writer needs to know about one font file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,13 +201,17 @@ fn push_name(out: &mut Vec<u8>, text: &str) {
     out.extend_from_slice(&[0, 0]);
 }
 
-/// The font wrapped as EOT 2.2 with its data uncompressed.
+/// The font wrapped as EOT 2.2, compressed when it can be.
 pub(crate) fn eot(data: &[u8], info: &FontInfo) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len() + 256);
+    let (body, flags): (Cow<'_, [u8]>, u32) = match mtx::compress(data) {
+        Some(compressed) => (Cow::Owned(compressed), COMPRESSED),
+        None => (Cow::Borrowed(data), 0),
+    };
+    let mut out = Vec::with_capacity(body.len() + 256);
     out.extend_from_slice(&[0, 0, 0, 0]);
-    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
     out.extend_from_slice(&0x0002_0002u32.to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&flags.to_le_bytes());
     out.extend_from_slice(&info.panose);
     out.push(0);
     out.push(u8::from(info.italic));
@@ -223,9 +234,9 @@ pub(crate) fn eot(data: &[u8], info: &FontInfo) -> Vec<u8> {
     out.extend_from_slice(&0x5047_5342u32.to_le_bytes());
     out.extend_from_slice(&0x0000_04E4u32.to_le_bytes());
     out.extend_from_slice(&[0u8; 12]);
-    let total = (out.len() + data.len()) as u32;
+    let total = (out.len() + body.len()) as u32;
     out[..4].copy_from_slice(&total.to_le_bytes());
-    out.extend_from_slice(data);
+    out.extend_from_slice(&body);
     out
 }
 
@@ -274,9 +285,10 @@ mod tests {
         let le32 = |at: usize| u32::from_le_bytes(wrapped[at..at + 4].try_into().unwrap());
         let le16 = |at: usize| u16::from_le_bytes(wrapped[at..at + 2].try_into().unwrap());
         assert_eq!(le32(0) as usize, wrapped.len());
-        assert_eq!(le32(4) as usize, REGULAR.len());
+        let body = &wrapped[wrapped.len() - le32(4) as usize..];
+        assert!(body.len() < REGULAR.len());
         assert_eq!(le32(8), 0x0002_0002);
-        assert_eq!(le32(12), 0);
+        assert_eq!(le32(12), COMPRESSED);
         assert_eq!(&wrapped[16..26], &described.panose);
         assert_eq!(wrapped[27], 0);
         assert_eq!(le32(28), 400);
@@ -286,10 +298,10 @@ mod tests {
         assert_eq!(le16(80), 0);
         assert_eq!(le16(82), 10);
         assert_eq!(&wrapped[84..94], b"B\0o\0x\0y\0\0\0");
-        assert!(wrapped.ends_with(REGULAR));
+        assert_eq!(body[0], 3);
         assert_eq!(
-            &wrapped[wrapped.len() - REGULAR.len()..][..4],
-            &[0, 1, 0, 0]
+            &wrapped[wrapped.len() - body.len() - 12..][..4],
+            &[0, 0, 0, 0]
         );
     }
 }
