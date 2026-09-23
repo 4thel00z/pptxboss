@@ -1,6 +1,7 @@
 //! Serializes a [`Presentation`] into package parts (ECMA-376 Part 1,
 //! clauses 13, 19 and 21; Part 2, clauses 7 and 8).
 
+use crate::fonts::{self, FontInfo};
 use crate::layout::{self, Element, Grid, Planned};
 use crate::style::{
     bg_xml, body_levels_xml, clr_map_attrs, clr_map_ovr, ppr_xml, run_xml, theme_xml,
@@ -37,10 +38,17 @@ struct Media<'a> {
     data: &'a [u8],
 }
 
+/// One embedded font ready to write.
+struct FontPart {
+    info: FontInfo,
+    eot: Vec<u8>,
+}
+
 struct Ctx<'a> {
     presentation: &'a Presentation,
     /// Slides after the layout engine added its continuation slides.
     slide_count: usize,
+    fonts: Vec<FontPart>,
     has_notes: bool,
     media: Vec<Media<'a>>,
     /// Slide pictures seen so far, for error messages.
@@ -89,9 +97,20 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         .flat_map(|slide| layout::plan(slide, &grid, &presentation.theme))
         .collect();
     let has_notes = planned.iter().any(|slide| slide.notes.is_some());
+    let fonts = presentation
+        .theme
+        .embedded_fonts
+        .iter()
+        .map(|data| {
+            let info = fonts::info(data)?;
+            let eot = fonts::eot(data, &info);
+            Ok(FontPart { info, eot })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let mut ctx = Ctx {
         presentation,
         slide_count: planned.len(),
+        fonts,
         has_notes,
         media: Vec::new(),
         pictures: 0,
@@ -251,6 +270,13 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
             compress: false,
         });
     }
+    for (i, font) in ctx.fonts.iter().enumerate() {
+        parts.push(PartOut {
+            name: format!("ppt/fonts/font{}.fntdata", i + 1),
+            data: font.eot.clone(),
+            compress: true,
+        });
+    }
 
     push_xml(
         &mut parts,
@@ -276,7 +302,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         0,
         PartOut {
             name: "[Content_Types].xml".into(),
-            data: content_types_xml(&xml_parts, &ctx.media).into_bytes(),
+            data: content_types_xml(&xml_parts, &ctx.media, !ctx.fonts.is_empty()).into_bytes(),
             compress: true,
         },
     );
@@ -304,10 +330,13 @@ fn rels_part(name: &str, rels: &[(String, String, String)]) -> PartOut {
     }
 }
 
-fn content_types_xml(xml_parts: &[(String, String)], media: &[Media<'_>]) -> String {
+fn content_types_xml(xml_parts: &[(String, String)], media: &[Media<'_>], fonts: bool) -> String {
     let mut xml = format!(
         r#"{DECL}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>"#
     );
+    if fonts {
+        xml.push_str(r#"<Default Extension="fntdata" ContentType="application/x-fontdata"/>"#);
+    }
     let mut seen: Vec<ImageFormat> = Vec::new();
     for media in media {
         let format = media.format;
@@ -358,12 +387,74 @@ fn presentation_xml(ctx: &Ctx<'_>) -> String {
         .type_name()
         .map(|kind| format!(r#" type="{kind}""#))
         .unwrap_or_default();
-    xml.push_str(&format!(r#"<p:sldSz cx="{}" cy="{}"{kind}/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr>"#, size.cx, size.cy));
+    xml.push_str(&format!(
+        r#"<p:sldSz cx="{}" cy="{}"{kind}/><p:notesSz cx="6858000" cy="9144000"/>{}<p:defaultTextStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr>"#,
+        size.cx,
+        size.cy,
+        embedded_fonts_xml(ctx)
+    ));
     for level in 1..=9 {
         let indent = (level - 1) * 457_200;
         xml.push_str(&format!(r#"<a:lvl{level}pPr marL="{indent}" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1800" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#));
     }
     xml.push_str("</p:defaultTextStyle></p:presentation>");
+    xml
+}
+
+/// The relationship id of the `i`th font part: fonts follow the slides
+/// and the four fixed relationships.
+fn font_rel_id(ctx: &Ctx<'_>, i: usize) -> String {
+    let notes = usize::from(ctx.has_notes);
+    format!("rId{}", 2 + notes + ctx.slide_count + 4 + i)
+}
+
+/// `p:embeddedFontLst`: one entry per family, its files in the regular,
+/// bold, italic and bold italic slots by the style each font declares.
+fn embedded_fonts_xml(ctx: &Ctx<'_>) -> String {
+    if ctx.fonts.is_empty() {
+        return String::new();
+    }
+    let mut families: Vec<&str> = Vec::new();
+    for font in &ctx.fonts {
+        if !families.contains(&font.info.family.as_str()) {
+            families.push(&font.info.family);
+        }
+    }
+    let mut xml = String::from("<p:embeddedFontLst>");
+    for family in families {
+        let members: Vec<(usize, &FontPart)> = ctx
+            .fonts
+            .iter()
+            .enumerate()
+            .filter(|(_, font)| font.info.family == family)
+            .collect();
+        let first = members[0].1;
+        xml.push_str(&format!(
+            r#"<p:embeddedFont><p:font typeface="{}" panose="{}" pitchFamily="{}" charset="0"/>"#,
+            attr(family),
+            first.info.panose_hex(),
+            first.info.pitch_family()
+        ));
+        for (element, bold, italic) in [
+            ("regular", false, false),
+            ("bold", true, false),
+            ("italic", false, true),
+            ("boldItalic", true, true),
+        ] {
+            let slot = members
+                .iter()
+                .rev()
+                .find(|(_, font)| font.info.bold == bold && font.info.italic == italic);
+            if let Some((i, _)) = slot {
+                xml.push_str(&format!(
+                    r#"<p:{element} r:id="{}"/>"#,
+                    font_rel_id(ctx, *i)
+                ));
+            }
+        }
+        xml.push_str("</p:embeddedFont>");
+    }
+    xml.push_str("</p:embeddedFontLst>");
     xml
 }
 
@@ -410,6 +501,13 @@ fn presentation_rels(ctx: &Ctx<'_>) -> Vec<(String, String, String)> {
         format!("{REL}tableStyles"),
         "tableStyles.xml".into(),
     ));
+    for i in 0..ctx.fonts.len() {
+        rels.push((
+            font_rel_id(ctx, i),
+            format!("{REL}font"),
+            format!("fonts/font{}.fntdata", i + 1),
+        ));
+    }
     rels
 }
 

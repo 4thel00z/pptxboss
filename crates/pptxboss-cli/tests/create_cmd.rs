@@ -125,3 +125,44 @@ fn create_md_with_theme_preset() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+fn create_md_embeds_a_font_file() {
+    let md = temp("fonted.md");
+    std::fs::write(&md, "# Boxy\n\n## A\n- b\n").unwrap();
+    let out = temp("fonted.pptx");
+    let font = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../pptxboss-write/tests/data/boxy-regular.ttf"
+    );
+    let (code, _, stderr) = run(&[
+        "create",
+        "md",
+        out.to_str().unwrap(),
+        md.to_str().unwrap(),
+        "--font",
+        "Boxy",
+        "--embed-font",
+        font,
+    ]);
+    assert_eq!(code, 0, "{stderr}");
+    let (code, _, stderr) = run(&["check", out.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stderr}");
+    let doc = pptxboss_core::Document::open(&out).unwrap();
+    let presentation = doc
+        .package()
+        .unwrap()
+        .read_part("/ppt/presentation.xml")
+        .unwrap();
+    assert!(String::from_utf8_lossy(&presentation).contains(r#"<p:font typeface="Boxy""#));
+    let (code, _, stderr) = run(&[
+        "create",
+        "md",
+        out.to_str().unwrap(),
+        md.to_str().unwrap(),
+        "--embed-font",
+        md.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("unsupported font"), "{stderr}");
+}

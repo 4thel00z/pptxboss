@@ -435,10 +435,12 @@ fn scale_from(sizes: HashMap<String, u32>) -> PyResult<TypeScale> {
     Ok(scale)
 }
 
-/// Colors, fonts, type scale and backgrounds shared by every slide.
-/// `colors` maps slot names (dark1, light1, dark2, light2, accent1 to
-/// accent6, hyperlink, followed_hyperlink) to `#RRGGBB`; `sizes` maps
-/// display, title, subtitle, body, table and minimum to points.
+/// Colors, fonts, type scale, backgrounds and embedded fonts shared by
+/// every slide. `colors` maps slot names (dark1, light1, dark2, light2,
+/// accent1 to accent6, hyperlink, followed_hyperlink) to `#RRGGBB`;
+/// `sizes` maps display, title, subtitle, body, table and minimum to
+/// points; `embed_fonts` holds TrueType or OpenType files stored in the
+/// deck.
 #[pyclass(module = "pptxboss.write")]
 #[derive(Clone)]
 pub struct Theme {
@@ -448,7 +450,7 @@ pub struct Theme {
 #[pymethods]
 impl Theme {
     #[new]
-    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, sizes=None, inverted=false, background=None))]
+    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, sizes=None, inverted=false, background=None, embed_fonts=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         name: &str,
@@ -459,8 +461,12 @@ impl Theme {
         sizes: Option<HashMap<String, u32>>,
         inverted: bool,
         background: Option<Background>,
+        embed_fonts: Option<Vec<Vec<u8>>>,
     ) -> PyResult<Self> {
         let mut inner = CoreTheme::new(name);
+        for data in embed_fonts.unwrap_or_default() {
+            inner = inner.embed_font(data);
+        }
         if let Some(sizes) = sizes {
             inner = inner.scale(scale_from(sizes)?);
         }
@@ -509,6 +515,20 @@ impl Theme {
     #[staticmethod]
     fn presets() -> Vec<&'static str> {
         CoreTheme::PRESETS.to_vec()
+    }
+
+    /// Stores a TrueType or OpenType font file in the deck. Files of one
+    /// family fill its regular, bold, italic and bold italic slots. Saving
+    /// fails for a font whose license forbids embedding.
+    fn embed_font(mut slf: PyRefMut<'_, Self>, data: Vec<u8>) -> PyRefMut<'_, Self> {
+        slf.inner = std::mem::take(&mut slf.inner).embed_font(data);
+        slf
+    }
+
+    /// The number of embedded font files.
+    #[getter]
+    fn embedded_font_count(&self) -> usize {
+        self.inner.embedded_fonts.len()
     }
 
     /// A background for one layout; `inverted` swaps light and dark text on it.
