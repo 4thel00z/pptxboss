@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/4thel00z/pptxboss/compare/v2.0.0...v2.1.0) (2026-09-23)
+
+
+### Features
+
+* **write:** embed font files in the deck ([#14](https://github.com/4thel00z/pptxboss/issues/14)) ([e186911](https://github.com/4thel00z/pptxboss/commit/e1869115be8e6e6d3f0f35d8abdde5a3ab0d7ffe))
+
 ## [2.0.0](https://github.com/4thel00z/pptxboss/compare/v1.1.0...v2.0.0) (2026-09-23)
 
 
