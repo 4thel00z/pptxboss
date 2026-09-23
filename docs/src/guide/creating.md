@@ -133,10 +133,11 @@ let deck = Presentation::new()
 
 A deck set in a font the viewer's machine lacks falls back to another
 font, and the layout changes with it. `Theme::embed_font` stores a
-TrueType or OpenType file in the deck as Embedded OpenType, the form
-PowerPoint writes and reads, so the deck renders in that font anywhere.
-Files of one family fill its regular, bold, italic and bold italic slots
-by the style each file declares. Writing fails for a font whose license
+TrueType or OpenType file in the deck as Embedded OpenType, the container
+PowerPoint reads, so the deck renders in that font anywhere. Files of one
+family fill its regular, bold, italic and bold italic slots by the bold and
+italic flags they declare, so a family with more weights than those four
+keeps the last file given for each slot. Writing fails for a font whose license
 forbids embedding (the `fsType` restricted bit) and for font collections.
 
 ```rust
