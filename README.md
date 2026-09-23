@@ -190,8 +190,9 @@ Content without coordinates is placed by the layout engine: it measures
 text with embedded font metrics, stacks blocks or sets them in columns,
 shrinks body text to the theme's minimum when a slide is full, and
 continues what is left on the next slide. `Theme::embed_font` stores a
-TrueType or OpenType file in the deck, so it renders in that font on
-machines that lack it. Output is deterministic (fixed timestamps, fixed
+TrueType or OpenType file in the deck, compressed the way PowerPoint
+stores its own embedded fonts, so it renders in that font on machines
+that lack it. Output is deterministic (fixed timestamps, fixed
 part order), reads back through `pptxboss-core`, and passes
 `pptxboss check` with no findings.
 

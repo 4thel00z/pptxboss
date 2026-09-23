@@ -362,8 +362,12 @@ fn content_types_xml(xml_parts: &[(String, String)], media: &[Media<'_>], fonts:
 
 fn presentation_xml(ctx: &Ctx<'_>) -> String {
     let size = ctx.presentation.size;
+    let embedded = match ctx.fonts.is_empty() {
+        true => "",
+        false => r#" embedTrueTypeFonts="1""#,
+    };
     let mut xml = format!(
-        r#"{DECL}<p:presentation xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>"#
+        r#"{DECL}<p:presentation xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"{embedded} saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>"#
     );
     let mut next_rel = 2;
     if ctx.has_notes {

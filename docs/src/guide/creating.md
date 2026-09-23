@@ -134,11 +134,14 @@ let deck = Presentation::new()
 A deck set in a font the viewer's machine lacks falls back to another
 font, and the layout changes with it. `Theme::embed_font` stores a
 TrueType or OpenType file in the deck as Embedded OpenType, the container
-PowerPoint reads, so the deck renders in that font anywhere. Files of one
-family fill its regular, bold, italic and bold italic slots by the bold and
-italic flags they declare, so a family with more weights than those four
-keeps the last file given for each slot. Writing fails for a font whose license
-forbids embedding (the `fsType` restricted bit) and for font collections.
+PowerPoint reads, so the deck renders in that font anywhere. The font data
+is MicroType Express compressed, the way PowerPoint itself stores it, which
+brings a file to roughly a third of its size; a file the coder cannot
+handle is stored as it is. Files of one family fill its regular, bold,
+italic and bold italic slots by the bold and italic flags they declare, so
+a family with more weights than those four keeps the last file given for
+each slot. Writing fails for a font whose license forbids embedding (the
+`fsType` restricted bit) and for font collections.
 
 ```rust
 use pptxboss_write::Theme;
@@ -153,8 +156,9 @@ let theme = Theme::mono()
 pptxboss create md out.pptx slides.md --font Inter --embed-font Inter-Regular.ttf --embed-font Inter-Bold.ttf
 ```
 
-LibreOffice reads embedded fonts only when built with EOT support, so a
-LibreOffice render may still substitute.
+LibreOffice reads embedded fonts from 25.8 on, and only in builds with
+EOT support (libeot), as the Debian and Fedora packages are; the builds
+from libreoffice.org lack it, so a render there still substitutes.
 
 ### Python
 
