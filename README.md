@@ -193,6 +193,36 @@ continues what is left on the next slide. Output is deterministic (fixed
 timestamps, fixed part order), reads back through `pptxboss-core`, and
 passes `pptxboss check` with no findings.
 
+The same from Python, and from Markdown through the CLI:
+
+```python
+from pptxboss import write
+
+deck = write.Presentation(theme=write.Theme.preset("nord"))
+deck.add(write.Slide("Text beside a picture")
+    .columns(["Seven twelfths for the text", "Five for the picture"], write.Picture(open("chart.png", "rb").read()))
+    .table(rows))
+deck.save("review.pptx")
+```
+
+```sh
+pptxboss create md out.pptx slides.md --theme mocha   # a long list continues on the next slide
+```
+
+Slides from `cargo run -p pptxboss-write --example placed -- placed.pptx chart.png`,
+rendered with LibreOffice:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/4thel00z/pptxboss/main/assets/examples/placed-agenda.webp" alt="An agenda of fourteen items, the first seven on this slide at full size" width="49%">
+  <img src="https://raw.githubusercontent.com/4thel00z/pptxboss/main/assets/examples/placed-beside.webp" alt="Three bullets beside a picture that keeps its aspect ratio" width="49%">
+  <img src="https://raw.githubusercontent.com/4thel00z/pptxboss/main/assets/examples/placed-table.webp" alt="The first fourteen rows of a twenty-eight row table with its header" width="49%">
+  <img src="https://raw.githubusercontent.com/4thel00z/pptxboss/main/assets/examples/placed-stacked.webp" alt="A paragraph, a table and three text columns stacked on one slide" width="49%">
+</p>
+
+Fourteen agenda items split seven and seven at full size instead of
+shrinking; the table continues on a second slide with its header row;
+the picture column takes five twelfths of the width.
+
 ## Benchmarks
 
 **pptxboss is the fastest library measured, on one thread as well as on
