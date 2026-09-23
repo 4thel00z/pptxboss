@@ -1,14 +1,13 @@
 //! Serializes a [`Presentation`] into package parts (ECMA-376 Part 1,
 //! clauses 13, 19 and 21; Part 2, clauses 7 and 8).
 
+use crate::layout::{self, Element, Grid, Planned};
 use crate::style::{
-    bg_xml, clr_map_attrs, clr_map_ovr, ppr_xml, run_xml, theme_xml, ParagraphMode, NS_A,
+    bg_xml, body_levels_xml, clr_map_attrs, clr_map_ovr, ppr_xml, run_xml, theme_xml,
+    ParagraphMode, NS_A,
 };
 use crate::xml::{attr, text, DECL};
-use crate::{
-    Background, Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape, Slide,
-    SlideSize,
-};
+use crate::{Background, Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape};
 
 const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -40,6 +39,8 @@ struct Media<'a> {
 
 struct Ctx<'a> {
     presentation: &'a Presentation,
+    /// Slides after the layout engine added its continuation slides.
+    slide_count: usize,
     has_notes: bool,
     media: Vec<Media<'a>>,
     /// Slide pictures seen so far, for error messages.
@@ -80,44 +81,21 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// The geometry the layouts share, derived from the slide size.
-struct Frames {
-    title: Rect,
-    body: Rect,
-    center_title: Rect,
-    subtitle: Rect,
-}
-
-impl Frames {
-    fn for_size(size: SlideSize) -> Self {
-        let margin = size.cx * 55 / 800;
-        let width = size.cx - 2 * margin;
-        Self {
-            title: Rect::new(margin, 365_125, width, 1_325_563),
-            body: Rect::new(margin, 1_825_625, width, size.cy - 1_825_625 - 681_037),
-            center_title: Rect::new(margin, size.cy / 6, width, 2_387_600),
-            subtitle: Rect::new(
-                size.cx / 8,
-                size.cy / 6 + 2_479_675,
-                size.cx * 3 / 4,
-                1_655_762,
-            ),
-        }
-    }
-}
-
 pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
-    let has_notes = presentation
+    let grid = Grid::for_size(presentation.size);
+    let planned: Vec<Planned<'_>> = presentation
         .slides
         .iter()
-        .any(|slide| slide.notes.is_some());
+        .flat_map(|slide| layout::plan(slide, &grid, &presentation.theme))
+        .collect();
+    let has_notes = planned.iter().any(|slide| slide.notes.is_some());
     let mut ctx = Ctx {
         presentation,
+        slide_count: planned.len(),
         has_notes,
         media: Vec::new(),
         pictures: 0,
     };
-    let frames = Frames::for_size(presentation.size);
     let mut parts: Vec<PartOut> = Vec::new();
     let mut xml_parts: Vec<(String, String)> = Vec::new();
 
@@ -176,7 +154,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         theme_xml(&presentation.theme),
     );
 
-    let (master, master_rels) = master_xml(&mut ctx, &frames)?;
+    let (master, master_rels) = master_xml(&mut ctx, &grid)?;
     push_xml(
         &mut parts,
         &mut xml_parts,
@@ -195,7 +173,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         Layout::Blank,
     ] {
         let index = layout.index();
-        let (xml, layout_rels) = layout_xml(&mut ctx, layout, &frames)?;
+        let (xml, layout_rels) = layout_xml(&mut ctx, layout, &grid)?;
         push_xml(
             &mut parts,
             &mut xml_parts,
@@ -226,9 +204,9 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         ));
     }
 
-    for (i, slide) in presentation.slides.iter().enumerate() {
+    for (i, slide) in planned.iter().enumerate() {
         let n = i + 1;
-        let (xml, slide_rels) = slide_xml(&mut ctx, slide, n, &frames)?;
+        let (xml, slide_rels) = slide_xml(&mut ctx, slide, n, &grid)?;
         push_xml(
             &mut parts,
             &mut xml_parts,
@@ -240,7 +218,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
             &format!("ppt/slides/_rels/slide{n}.xml.rels"),
             &slide_rels,
         ));
-        if let Some(notes) = &slide.notes {
+        if let Some(notes) = slide.notes {
             push_xml(
                 &mut parts,
                 &mut xml_parts,
@@ -286,7 +264,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         &mut xml_parts,
         "docProps/app.xml",
         "application/vnd.openxmlformats-officedocument.extended-properties+xml",
-        app_xml(presentation),
+        app_xml(presentation, &planned),
     );
 
     parts.insert(0, rels_part("_rels/.rels", &[
@@ -365,9 +343,9 @@ fn presentation_xml(ctx: &Ctx<'_>) -> String {
         ));
         next_rel += 1;
     }
-    if !ctx.presentation.slides.is_empty() {
+    if ctx.slide_count > 0 {
         xml.push_str("<p:sldIdLst>");
-        for i in 0..ctx.presentation.slides.len() {
+        for i in 0..ctx.slide_count {
             xml.push_str(&format!(
                 r#"<p:sldId id="{}" r:id="rId{}"/>"#,
                 256 + i,
@@ -404,14 +382,14 @@ fn presentation_rels(ctx: &Ctx<'_>) -> Vec<(String, String, String)> {
         ));
         next += 1;
     }
-    for i in 0..ctx.presentation.slides.len() {
+    for i in 0..ctx.slide_count {
         rels.push((
             format!("rId{}", next + i),
             format!("{REL}slide"),
             format!("slides/slide{}.xml", i + 1),
         ));
     }
-    next += ctx.presentation.slides.len();
+    next += ctx.slide_count;
     rels.push((
         format!("rId{next}"),
         format!("{REL}presProps"),
@@ -477,7 +455,7 @@ fn prompt(text_value: &str) -> String {
     )
 }
 
-fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel>)> {
+fn master_xml<'a>(ctx: &mut Ctx<'a>, grid: &Grid) -> Result<(String, Vec<Rel>)> {
     let theme = &ctx.presentation.theme;
     let mut rels = Rels::new();
     for i in 1..=4 {
@@ -492,8 +470,8 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel
         r#"{DECL}<p:sldMaster xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}"><p:cSld>{bg}<p:spTree>{}"#,
         group_header()
     );
-    xml.push_str(&placeholder_sp(2, "Title Placeholder 1", r#"<p:ph type="title"/>"#, Some(frames.title), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master title style")));
-    xml.push_str(&placeholder_sp(3, "Text Placeholder 2", r#"<p:ph type="body" idx="1"/>"#, Some(frames.body), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master text styles")));
+    xml.push_str(&placeholder_sp(2, "Title Placeholder 1", r#"<p:ph type="title"/>"#, Some(grid.title), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master title style")));
+    xml.push_str(&placeholder_sp(3, "Text Placeholder 2", r#"<p:ph type="body" idx="1"/>"#, Some(grid.body), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master text styles")));
     xml.push_str(&format!(
         "</p:spTree></p:cSld><p:clrMap {}/><p:sldLayoutIdLst>",
         clr_map_attrs(false)
@@ -504,13 +482,7 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel
             2_147_483_648u32 + i
         ));
     }
-    xml.push_str(r#"</p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="4400" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/><a:ea typeface="+mj-ea"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle>"#);
-    let sizes = [2800u32, 2400, 2000, 1800, 1800, 1800, 1800, 1800, 1800];
-    for (level, size) in sizes.iter().enumerate() {
-        let level = level + 1;
-        let mar_l = 228_600 + (level as i64 - 1) * 457_200;
-        xml.push_str(&format!(r#"<a:lvl{level}pPr marL="{mar_l}" indent="-228600" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="{}"/></a:spcBef><a:buClr><a:schemeClr val="accent1"/></a:buClr><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/><a:defRPr sz="{size}" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#, if level == 1 { 1000 } else { 500 }));
-    }
+    xml.push_str(&format!(r#"</p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="{}" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/><a:ea typeface="+mj-ea"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle>{}"#, theme.scale.title * 100, body_levels_xml(theme, 100)));
     xml.push_str(r#"</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr>"#);
     for level in 1..=9 {
         let mar_l = (level - 1) * 457_200;
@@ -520,12 +492,10 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, frames: &Frames) -> Result<(String, Vec<Rel
     Ok((xml, rels.list))
 }
 
-fn layout_xml<'a>(
-    ctx: &mut Ctx<'a>,
-    layout: Layout,
-    frames: &Frames,
-) -> Result<(String, Vec<Rel>)> {
+fn layout_xml<'a>(ctx: &mut Ctx<'a>, layout: Layout, grid: &Grid) -> Result<(String, Vec<Rel>)> {
     let theme = &ctx.presentation.theme;
+    let display = theme.scale.display * 100;
+    let subtitle = theme.scale.subtitle * 100;
     let mut rels = Rels::new();
     rels.add(
         &format!("{REL}slideMaster"),
@@ -547,16 +517,20 @@ fn layout_xml<'a>(
                     2,
                     "Title 1",
                     r#"<p:ph type="ctrTitle"/>"#,
-                    Some(frames.center_title),
-                    r#"<a:bodyPr anchor="b"/><a:lstStyle><a:lvl1pPr algn="ctr"><a:defRPr sz="5400"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#,
+                    Some(grid.center_title),
+                    &format!(
+                        r#"<a:bodyPr anchor="b"/><a:lstStyle><a:lvl1pPr algn="ctr"><a:defRPr sz="{display}"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#
+                    ),
                     &prompt("Click to edit Master title style")
                 ),
                 placeholder_sp(
                     3,
                     "Subtitle 2",
                     r#"<p:ph type="subTitle" idx="1"/>"#,
-                    Some(frames.subtitle),
-                    r#"<a:bodyPr/><a:lstStyle><a:lvl1pPr marL="0" indent="0" algn="ctr"><a:buNone/><a:defRPr sz="2400"/></a:lvl1pPr></a:lstStyle>"#,
+                    Some(grid.subtitle),
+                    &format!(
+                        r#"<a:bodyPr/><a:lstStyle><a:lvl1pPr marL="0" indent="0" algn="ctr"><a:buNone/><a:defRPr sz="{subtitle}"/></a:lvl1pPr></a:lstStyle>"#
+                    ),
                     &prompt("Click to edit Master subtitle style")
                 )
             ),
@@ -597,6 +571,8 @@ fn layout_xml<'a>(
             ),
         ),
         Layout::Blank => ("blank", "Blank", String::new()),
+        #[allow(unreachable_patterns)]
+        _ => ("blank", "Blank", String::new()),
     };
     let xml = format!(
         r#"{DECL}<p:sldLayout xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" type="{kind}" preserve="1"><p:cSld name="{name}">{bg}<p:spTree>{}{shapes}</p:spTree></p:cSld>{ovr}</p:sldLayout>"#,
@@ -704,19 +680,128 @@ fn paragraphs_xml(
     xml
 }
 
+/// A run of plain text at an optional explicit size in points.
+fn plain_paragraph(value: &str, size: Option<u32>) -> String {
+    let sz = size
+        .map(|points| format!(r#" sz="{}""#, points * 100))
+        .unwrap_or_default();
+    format!(
+        r#"<a:p><a:r><a:rPr lang="en-US"{sz} dirty="0"/><a:t>{}</a:t></a:r></a:p>"#,
+        text(value)
+    )
+}
+
+/// A `lstStyle` carrying the body levels at `scale`, or an empty one at 100.
+fn body_list_style(ctx: &Ctx<'_>, scale: u32, always: bool) -> String {
+    if scale == 100 && !always {
+        return "<a:lstStyle/>".to_string();
+    }
+    format!(
+        "<a:lstStyle>{}</a:lstStyle>",
+        body_levels_xml(&ctx.presentation.theme, scale)
+    )
+}
+
+fn picture_xml<'a>(
+    ctx: &mut Ctx<'a>,
+    rels: &mut Rels,
+    id: u32,
+    data: &'a [u8],
+    name: &str,
+    description: Option<&str>,
+    rect: Rect,
+) -> Result<String> {
+    ctx.pictures += 1;
+    let target = ctx
+        .add_media(data)
+        .ok_or(Error::UnsupportedImage(ctx.pictures))?;
+    let rel_id = rels.add(&format!("{REL}image"), target);
+    let descr = description
+        .map(|d| format!(r#" descr="{}""#, attr(d)))
+        .unwrap_or_default();
+    Ok(format!(
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{}"{descr}/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#,
+        attr(name),
+        xfrm(rect)
+    ))
+}
+
+fn table_xml(
+    id: u32,
+    rows: &[Vec<String>],
+    header: bool,
+    rect: Rect,
+    row_heights: &[i64],
+    size: u32,
+) -> Result<String> {
+    let columns = rows.first().map_or(0, Vec::len);
+    for (row, cells) in rows.iter().enumerate() {
+        if cells.len() != columns {
+            return Err(Error::RaggedTable {
+                row,
+                cells: cells.len(),
+                columns,
+            });
+        }
+    }
+    let col_w = match columns {
+        0 => rect.cx,
+        n => rect.cx / n as i64,
+    };
+    let mut tbl = format!(
+        r#"<a:tbl><a:tblPr firstRow="{}" bandRow="0"/><a:tblGrid>"#,
+        u8::from(header)
+    );
+    for _ in 0..columns {
+        tbl.push_str(&format!(r#"<a:gridCol w="{col_w}"/>"#));
+    }
+    tbl.push_str("</a:tblGrid>");
+    let sz = size * 100;
+    for (row, cells) in rows.iter().enumerate() {
+        let heading = header && row == 0;
+        let (bold, rule) = match heading {
+            true => (r#" b="1""#, TABLE_HEAD_RULE),
+            false => ("", TABLE_ROW_RULE),
+        };
+        tbl.push_str(&format!(r#"<a:tr h="{}">"#, row_heights[row]));
+        for cell in cells {
+            tbl.push_str(&format!(r#"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="{sz}"{bold} dirty="0"/><a:t>{}</a:t></a:r></a:p></a:txBody><a:tcPr anchor="ctr">{TABLE_OPEN_SIDES}{rule}<a:noFill/></a:tcPr></a:tc>"#, text(cell)));
+        }
+        tbl.push_str("</a:tr>");
+    }
+    tbl.push_str("</a:tbl>");
+    Ok(format!(
+        r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{id}" name="Table {}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">{tbl}</a:graphicData></a:graphic></p:graphicFrame>"#,
+        id - 1,
+        rect.x,
+        rect.y,
+        rect.cx,
+        rect.cy
+    ))
+}
+
+/// Equal row heights for a table at a fixed position.
+fn even_rows(rows: usize, height: i64) -> Vec<i64> {
+    match rows {
+        0 => Vec::new(),
+        n => vec![height / n as i64; n],
+    }
+}
+
 fn slide_xml<'a>(
     ctx: &mut Ctx<'a>,
-    slide: &'a Slide,
+    planned: &Planned<'a>,
     n: usize,
-    frames: &Frames,
+    grid: &Grid,
 ) -> Result<(String, Vec<Rel>)> {
-    let layout = slide.effective_layout();
+    let slide = planned.source;
+    let layout = planned.layout;
     let mut rels = Rels::new();
     rels.add(
         &format!("{REL}slideLayout"),
         format!("../slideLayouts/slideLayout{}.xml", layout.index()),
     );
-    if slide.notes.is_some() {
+    if planned.notes.is_some() {
         rels.add(
             &format!("{REL}notesSlide"),
             format!("../notesSlides/notesSlide{n}.xml"),
@@ -732,7 +817,7 @@ fn slide_xml<'a>(
             _ => r#"<p:ph type="title"/>"#,
         };
         let rect = match layout {
-            Layout::Blank => Some(frames.title),
+            Layout::Blank => Some(grid.title),
             _ => None,
         };
         shapes.push_str(&placeholder_sp(
@@ -741,10 +826,7 @@ fn slide_xml<'a>(
             ph,
             rect,
             PLAIN_BODY_PR,
-            &format!(
-                r#"<a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>{}</a:t></a:r></a:p>"#,
-                text(title)
-            ),
+            &plain_paragraph(title, planned.title_size),
         ));
         next_id += 1;
     }
@@ -755,89 +837,99 @@ fn slide_xml<'a>(
             r#"<p:ph type="subTitle" idx="1"/>"#,
             None,
             PLAIN_BODY_PR,
-            &format!(
-                r#"<a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>{}</a:t></a:r></a:p>"#,
-                text(subtitle)
-            ),
+            &plain_paragraph(subtitle, None),
         ));
         next_id += 1;
     }
-    if !slide.body.is_empty() {
-        let rect = match layout {
-            Layout::TitleAndContent => None,
-            _ => Some(frames.body),
-        };
-        shapes.push_str(&placeholder_sp(
-            next_id,
-            "Content Placeholder 2",
-            r#"<p:ph idx="1"/>"#,
-            rect,
-            PLAIN_BODY_PR,
-            &paragraphs_xml(&slide.body, ParagraphMode::Body, &mut rels, swapped),
-        ));
-        next_id += 1;
-    }
-    for shape in &slide.shapes {
-        match shape {
-            Shape::Text { paragraphs, rect } => {
+    for element in &planned.elements {
+        match element {
+            Element::Body {
+                paragraphs,
+                rect,
+                scale,
+            } => {
+                let autofit = match rect {
+                    Some(_) => "<a:bodyPr><a:noAutofit/></a:bodyPr>",
+                    None => "<a:bodyPr/>",
+                };
+                let body_pr = format!("{autofit}{}", body_list_style(ctx, *scale, false));
+                shapes.push_str(&placeholder_sp(
+                    next_id,
+                    "Content Placeholder 2",
+                    r#"<p:ph idx="1"/>"#,
+                    *rect,
+                    &body_pr,
+                    &paragraphs_xml(paragraphs, ParagraphMode::Body, &mut rels, swapped),
+                ));
+                next_id += 1;
+            }
+            Element::TextBox {
+                paragraphs,
+                rect,
+                scale,
+            } => {
+                shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0" anchor="t"/>{}{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), body_list_style(ctx, *scale, true), paragraphs_xml(paragraphs, ParagraphMode::Body, &mut rels, swapped)));
+                next_id += 1;
+            }
+            Element::Picture {
+                data,
+                description,
+                rect,
+            } => {
+                let name = format!("Picture {}", next_id - 1);
+                shapes.push_str(&picture_xml(
+                    ctx,
+                    &mut rels,
+                    next_id,
+                    data,
+                    &name,
+                    *description,
+                    *rect,
+                )?);
+                next_id += 1;
+            }
+            Element::Table {
+                rows,
+                header,
+                rect,
+                row_heights,
+                size,
+            } => {
+                shapes.push_str(&table_xml(
+                    next_id,
+                    rows,
+                    *header,
+                    *rect,
+                    row_heights,
+                    *size,
+                )?);
+                next_id += 1;
+            }
+            Element::Shape(Shape::Text { paragraphs, rect }) => {
                 shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), paragraphs_xml(paragraphs, ParagraphMode::Box, &mut rels, swapped)));
                 next_id += 1;
             }
-            Shape::Picture(picture) => {
-                ctx.pictures += 1;
-                let target = ctx
-                    .add_media(&picture.data)
-                    .ok_or(Error::UnsupportedImage(ctx.pictures))?;
-                let rel_id = rels.add(&format!("{REL}image"), target);
-                let descr = picture
-                    .description
-                    .as_deref()
-                    .map(|d| format!(r#" descr="{}""#, attr(d)))
-                    .unwrap_or_default();
-                shapes.push_str(&format!(r#"<p:pic><p:nvPicPr><p:cNvPr id="{next_id}" name="{}"{descr}/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#, attr(&picture.name), xfrm(picture.rect)));
+            Element::Shape(Shape::Picture(picture)) => {
+                shapes.push_str(&picture_xml(
+                    ctx,
+                    &mut rels,
+                    next_id,
+                    &picture.data,
+                    &picture.name,
+                    picture.description.as_deref(),
+                    picture.rect,
+                )?);
                 next_id += 1;
             }
-            Shape::Table(table) => {
-                let columns = table.rows.first().map_or(0, Vec::len);
-                for (row, cells) in table.rows.iter().enumerate() {
-                    if cells.len() != columns {
-                        return Err(Error::RaggedTable {
-                            row,
-                            cells: cells.len(),
-                            columns,
-                        });
-                    }
-                }
-                let col_w = match columns {
-                    0 => table.rect.cx,
-                    n => table.rect.cx / n as i64,
-                };
-                let row_h = match table.rows.len() {
-                    0 => table.rect.cy,
-                    n => table.rect.cy / n as i64,
-                };
-                let mut tbl = format!(
-                    r#"<a:tbl><a:tblPr firstRow="{}" bandRow="0"/><a:tblGrid>"#,
-                    u8::from(table.header)
-                );
-                for _ in 0..columns {
-                    tbl.push_str(&format!(r#"<a:gridCol w="{col_w}"/>"#));
-                }
-                tbl.push_str("</a:tblGrid>");
-                for (row, cells) in table.rows.iter().enumerate() {
-                    let heading = table.header && row == 0;
-                    let (bold, rule) = match heading {
-                        true => (r#" b="1""#, TABLE_HEAD_RULE),
-                        false => ("", TABLE_ROW_RULE),
-                    };
-                    tbl.push_str(&format!(r#"<a:tr h="{row_h}">"#));
-                    for cell in cells {
-                        tbl.push_str(&format!(r#"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="1600"{bold} dirty="0"/><a:t>{}</a:t></a:r></a:p></a:txBody><a:tcPr anchor="ctr">{TABLE_OPEN_SIDES}{rule}<a:noFill/></a:tcPr></a:tc>"#, text(cell)));
-                    }
-                    tbl.push_str("</a:tr>");
-                }
-                tbl.push_str("</a:tbl>");
-                shapes.push_str(&format!(r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{next_id}" name="Table {}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">{tbl}</a:graphicData></a:graphic></p:graphicFrame>"#, next_id - 1, table.rect.x, table.rect.y, table.rect.cx, table.rect.cy));
+            Element::Shape(Shape::Table(table)) => {
+                shapes.push_str(&table_xml(
+                    next_id,
+                    &table.rows,
+                    table.header,
+                    table.rect,
+                    &even_rows(table.rows.len(), table.rect.cy),
+                    ctx.presentation.theme.scale.table,
+                )?);
                 next_id += 1;
             }
         }
@@ -873,24 +965,16 @@ fn core_xml(presentation: &Presentation) -> String {
     xml
 }
 
-fn app_xml(presentation: &Presentation) -> String {
+fn app_xml(presentation: &Presentation, slides: &[Planned<'_>]) -> String {
     let format_name = match presentation.size.type_name() {
         Some("screen16x9") => "Widescreen",
         Some("screen4x3") => "On-screen Show (4:3)",
         _ => "Custom",
     };
-    let notes = presentation
-        .slides
-        .iter()
-        .filter(|slide| slide.notes.is_some())
-        .count();
-    let hidden = presentation
-        .slides
-        .iter()
-        .filter(|slide| slide.hidden)
-        .count();
+    let notes = slides.iter().filter(|slide| slide.notes.is_some()).count();
+    let hidden = slides.iter().filter(|slide| slide.source.hidden).count();
     format!(
         r#"{DECL}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>pptxboss</Application><PresentationFormat>{format_name}</PresentationFormat><Slides>{}</Slides><Notes>{notes}</Notes><HiddenSlides>{hidden}</HiddenSlides><ScaleCrop>false</ScaleCrop><LinksUpToDate>false</LinksUpToDate><SharedDoc>false</SharedDoc><HyperlinksChanged>false</HyperlinksChanged><AppVersion>00.0100</AppVersion></Properties>"#,
-        presentation.slides.len()
+        slides.len()
     )
 }

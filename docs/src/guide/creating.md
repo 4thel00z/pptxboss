@@ -1,11 +1,12 @@
 # Creating decks
 
 `pptxboss-write` builds decks with one master, four layouts (title, title
-and content, title only, blank), a theme of twelve colors and two fonts,
-and slides made of titles, subtitles, bullet lists, paragraphs of
-formatted runs, text boxes, tables, pictures, solid, gradient or picture
-backgrounds and speaker notes. Output is deterministic: fixed timestamps,
-fixed part order, ids in insertion order. Every deck it writes reads back
+and content, title only, blank), a theme of twelve colors, two fonts and a
+type scale, and slides made of titles, subtitles, bullet lists, paragraphs
+of formatted runs, text boxes, tables, pictures, solid, gradient or picture
+backgrounds and speaker notes. Content given without a position is placed
+by the layout engine. Output is deterministic: fixed timestamps, fixed
+part order, ids in insertion order. Every deck it writes reads back
 through the core and passes the verifier with no findings.
 
 ## CLI
@@ -38,6 +39,46 @@ The layout is inferred when not set: a title with body text uses Title and
 Content, a title with a subtitle uses Title, a title alone uses Title Only,
 no title uses Blank. Title slides center the title in the first accent
 color; bullets take the same color.
+
+## Layout engine
+
+Bullets, paragraphs and blocks are measured with font metrics embedded in
+the crate (Carlito for Calibri, Liberation Sans for Arial and other
+sans-serif fonts, Liberation Serif for Times New Roman and other serif
+fonts, Liberation Mono for monospaced fonts, Caladea for Cambria, Gelasio
+for Georgia) and placed below the title. When a slide is full the body
+scale steps down, never below the theme's minimum size; what still does
+not fit continues on the next slide with the same title, background and
+layout, split evenly over the slides it needs. A table carries its header
+row onto every continuation. A title that does not fit its frame shrinks
+on its own. Body text that fits at full size on a titled slide is written
+exactly as before; a slide without a title places its body from the top
+margin, and bullets in free text boxes take the first accent color like
+the body's.
+
+```rust
+use pptxboss_write::{Block, Slide};
+
+Slide::titled("Text beside a picture")
+    .columns(vec![
+        Block::bullets(["Seven twelfths for the text", "Five for the picture"]),
+        Block::picture_described(std::fs::read("chart.png")?, "cold starts by week"),
+    ])
+    .block(Block::table(rows, true));
+```
+
+A `Block` is text (`Block::text`, `Block::bullets`), a picture
+(`Block::picture`), a table (`Block::table`) or `Block::columns`, which
+sets its children side by side: two children of which one is a picture
+split seven to five in the text's favor, otherwise columns are equal.
+Blocks stack below the body in the order they are added. A picture keeps
+its aspect ratio inside its column; a table sizes each row to its cells.
+Pictures, tables and text boxes given a `Rect` stay where they are put.
+
+The type scale lives on the theme: `TypeScale { display, title, subtitle,
+body, table, minimum }` in points, with defaults of 54, 44, 24, 28, 16 and
+18. Body text at level 0 takes `body`; each deeper level is four points
+smaller, down to ten points below `body`.
 
 ## Styling
 
@@ -105,8 +146,23 @@ deck.save("dark.pptx")
 ```
 
 Colors in Python are `"#RRGGBB"` strings or slot names.
-`write.Theme("mine", colors={"accent1": "#123456"}, font="Georgia")` builds
-a custom theme; `write.Theme.presets()` lists the presets.
+`write.Theme("mine", colors={"accent1": "#123456"}, font="Georgia",
+sizes={"body": 24, "minimum": 16})` builds a custom theme;
+`write.Theme.presets()` lists the presets.
+
+Content without coordinates goes to the layout engine: `slide.picture(data)`
+and `slide.table(rows)` place themselves, `slide.columns(...)` sets blocks
+side by side and `slide.block(...)` stacks one. A block is a list of lines
+(strings become bullets, a `Paragraph` keeps its formatting), a
+`write.Picture`, a `write.Table` or a list of blocks.
+
+```python
+deck.add(
+    write.Slide("Text beside a picture")
+    .columns(["Seven twelfths for the text", "Five for the picture"], write.Picture(chart_png, description="cold starts"))
+    .table(rows)
+)
+```
 
 ## Round trip
 
@@ -119,7 +175,12 @@ assert!(pptxboss_check::check_bytes(bytes, &Default::default())?.findings.is_emp
 
 ## Limitations
 
-Pictures must be PNG, JPEG, GIF, BMP or TIFF; their box is given
-explicitly. Tables have equal column widths, a header rule in the first accent color and hairline row rules, and no cell fills. Titles,
-subtitles and table cells are plain text. There is no chart, diagram or
-embedded object creation, and no editing of existing decks.
+Pictures must be PNG, JPEG, GIF, BMP or TIFF; a TIFF placed by the layout
+engine is assumed to be four by three. Tables have equal column widths, a
+header rule in the first accent color and hairline row rules, and no cell
+fills. Titles, subtitles and table cells are plain text. Text measurement
+uses the metrics of the fonts named above; text set in another font is
+measured as Liberation Sans or Liberation Serif, so its line count may
+differ from the rendered one. Columns are never split across slides.
+There is no chart, diagram or embedded object creation, and no editing of
+existing decks.

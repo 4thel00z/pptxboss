@@ -1,13 +1,34 @@
 //! DrawingML for colors, fills, backgrounds, color maps, runs, paragraph
 //! properties and the theme part (ECMA-376 Part 1, clauses 20.1 and 21.1).
 
+use crate::layout::space_before;
 use crate::xml::{attr, text, DECL};
 use crate::{Align, Background, Color, Paragraph, Run, SchemeColor, Theme};
 
 pub const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const FMT_SCHEME: &str = r#"<a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="19050" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>"#;
 
-const BULLET_FONT: &str = r#"<a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/>"#;
+const BULLET_FONT: &str = r#"<a:buClr><a:schemeClr val="accent1"/></a:buClr><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/>"#;
+
+/// The nine levels of the master's body style at `scale` percent: indents,
+/// line spacing, space before, accent bullets and sizes from the theme's
+/// type scale. The master carries it at 100; a text box the layout engine
+/// places, or a body it shrinks, carries its own copy.
+pub fn body_levels_xml(theme: &Theme, scale: u32) -> String {
+    (1..=9u8)
+        .map(|level| {
+            let index = level - 1;
+            let mar_l = 228_600 + index as i64 * 457_200;
+            let size = (theme.scale.body_level(index) * scale + 50) / 100;
+            let before = (space_before(index) * scale + 50) / 100;
+            format!(
+                r#"<a:lvl{level}pPr marL="{mar_l}" indent="-228600" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPts val="{}"/></a:spcBef>{BULLET_FONT}<a:defRPr sz="{}" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl{level}pPr>"#,
+                before * 100,
+                size.max(1) * 100
+            )
+        })
+        .collect()
+}
 
 /// `a:srgbClr` or `a:schemeClr`; `swapped` is set when the theme is
 /// inverted, so a scheme slot points at the token that holds its value.
@@ -284,7 +305,7 @@ mod tests {
         );
         assert_eq!(
             ppr_xml(&Paragraph::bullet("x", 1), ParagraphMode::Box),
-            r#"<a:pPr marL="685800" lvl="1" indent="-228600"><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/></a:pPr>"#
+            r#"<a:pPr marL="685800" lvl="1" indent="-228600"><a:buClr><a:schemeClr val="accent1"/></a:buClr><a:buFont typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:buChar char="&#8226;"/></a:pPr>"#
         );
         assert_eq!(ppr_xml(&Paragraph::text("x"), ParagraphMode::Box), "");
         assert_eq!(
@@ -333,6 +354,22 @@ mod tests {
         );
         assert!(clr_map_ovr(true)
             .starts_with(r#"<p:clrMapOvr><a:overrideClrMapping bg1="dk1" tx1="lt1""#));
+    }
+
+    #[test]
+    fn body_levels_follow_the_type_scale() {
+        let full = body_levels_xml(&Theme::office(), 100);
+        assert!(full.starts_with(r#"<a:lvl1pPr marL="228600" indent="-228600""#));
+        assert!(full.contains(r#"<a:spcBef><a:spcPts val="1000"/></a:spcBef><a:buClr><a:schemeClr val="accent1"/></a:buClr>"#));
+        assert!(full.contains(r#"<a:defRPr sz="2800" kern="1200">"#));
+        assert!(full.contains(r#"<a:lvl2pPr marL="685800" indent="-228600""#));
+        assert!(full.contains(r#"<a:spcPts val="500"/></a:spcBef>"#));
+        assert!(full.contains(r#"<a:defRPr sz="1800" kern="1200">"#));
+        assert_eq!(full.matches("<a:lvl").count(), 9);
+        let half = body_levels_xml(&Theme::office(), 50);
+        assert!(half.contains(r#"<a:defRPr sz="1400" kern="1200">"#));
+        assert!(half.contains(r#"<a:spcPts val="500"/></a:spcBef>"#));
+        assert!(half.contains(r#"<a:defRPr sz="900" kern="1200">"#));
     }
 
     #[test]

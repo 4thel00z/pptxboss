@@ -1,8 +1,13 @@
 //! Creates `.pptx` decks from the ECMA-376 specification: a presentation
-//! with one master, four layouts and a theme of twelve colors and two
-//! fonts, slides built from titles, bullet lists, paragraphs of formatted
-//! runs, tables and pictures, solid, gradient or picture backgrounds, and
-//! speaker notes.
+//! with one master, four layouts and a theme of twelve colors, two fonts
+//! and a type scale, slides built from titles, bullet lists, paragraphs of
+//! formatted runs, tables and pictures, solid, gradient or picture
+//! backgrounds, and speaker notes.
+//!
+//! Content without a position is placed by the layout engine: text is
+//! measured with embedded font metrics, blocks stack down the slide or
+//! sit side by side in columns, the type scale shrinks to a floor when a
+//! slide is full, and what still does not fit continues on the next slide.
 //!
 //! Output is deterministic: fixed timestamps, entries in a fixed order,
 //! ids assigned in order of insertion. The result reads back through
@@ -10,7 +15,11 @@
 
 use std::path::Path;
 
+mod image;
+mod layout;
 mod markdown;
+mod metrics;
+mod metrics_data;
 mod parts;
 mod style;
 mod xml;
@@ -77,6 +86,7 @@ impl SlideSize {
 }
 
 /// The slide layouts the writer ships.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layout {
     /// Centered title and subtitle.
@@ -478,6 +488,67 @@ pub enum Shape {
     Table(Table),
 }
 
+/// Content the layout engine places: blocks stack down the slide below
+/// the title and the body; a `Columns` block sets its children side by
+/// side. Text is measured with the theme's fonts, pictures keep their
+/// aspect ratio, tables size their rows to their cells.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Block {
+    Text(Vec<Paragraph>),
+    Picture {
+        data: Vec<u8>,
+        description: Option<String>,
+    },
+    Table {
+        rows: Vec<Vec<String>>,
+        header: bool,
+    },
+    Columns(Vec<Block>),
+}
+
+impl Block {
+    pub fn text(paragraphs: Vec<Paragraph>) -> Self {
+        Block::Text(paragraphs)
+    }
+
+    /// One bulleted paragraph per item.
+    pub fn bullets<S: Into<String>>(items: impl IntoIterator<Item = S>) -> Self {
+        Block::Text(
+            items
+                .into_iter()
+                .map(|item| Paragraph::bullet(item, 0))
+                .collect(),
+        )
+    }
+
+    /// A picture (PNG, JPEG, GIF, BMP or TIFF bytes) sized to its column.
+    pub fn picture(data: Vec<u8>) -> Self {
+        Block::Picture {
+            data,
+            description: None,
+        }
+    }
+
+    pub fn picture_described(data: Vec<u8>, description: impl Into<String>) -> Self {
+        Block::Picture {
+            data,
+            description: Some(description.into()),
+        }
+    }
+
+    /// A table; every row must have the same number of cells as the first.
+    pub fn table(rows: Vec<Vec<String>>, header: bool) -> Self {
+        Block::Table { rows, header }
+    }
+
+    /// Blocks side by side. Two blocks of which one is a picture split
+    /// seven to five in the text's favor; otherwise columns are equal.
+    pub fn columns(blocks: Vec<Block>) -> Self {
+        Block::Columns(blocks)
+    }
+}
+
 /// One slide under construction.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Slide {
@@ -486,6 +557,9 @@ pub struct Slide {
     pub subtitle: Option<String>,
     /// Paragraphs of the body placeholder.
     pub body: Vec<Paragraph>,
+    /// Content placed by the layout engine, below the body.
+    pub blocks: Vec<Block>,
+    /// Content at fixed positions.
     pub shapes: Vec<Shape>,
     pub notes: Option<String>,
     pub hidden: bool,
@@ -542,6 +616,18 @@ impl Slide {
 
     pub fn body_paragraph(mut self, paragraph: Paragraph) -> Self {
         self.body.push(paragraph);
+        self
+    }
+
+    /// Adds a block for the layout engine to place.
+    pub fn block(mut self, block: Block) -> Self {
+        self.blocks.push(block);
+        self
+    }
+
+    /// Adds blocks side by side.
+    pub fn columns(mut self, blocks: Vec<Block>) -> Self {
+        self.blocks.push(Block::Columns(blocks));
         self
     }
 
@@ -606,14 +692,16 @@ impl Slide {
         self
     }
 
-    fn effective_layout(&self) -> Layout {
+    /// The layout to bind: the explicit one, else inferred from the title,
+    /// the subtitle and whether the layout engine placed a body.
+    pub(crate) fn layout_for(&self, has_body: bool) -> Layout {
         if let Some(layout) = self.layout {
             return layout;
         }
-        match (&self.title, self.body.is_empty(), self.subtitle.is_some()) {
-            (Some(_), false, _) => Layout::TitleAndContent,
-            (Some(_), true, true) => Layout::Title,
-            (Some(_), true, false) => Layout::TitleOnly,
+        match (&self.title, has_body, self.subtitle.is_some()) {
+            (Some(_), true, _) => Layout::TitleAndContent,
+            (Some(_), false, true) => Layout::Title,
+            (Some(_), false, false) => Layout::TitleOnly,
             (None, _, _) => Layout::Blank,
         }
     }
@@ -769,7 +857,44 @@ impl Default for ColorScheme {
     }
 }
 
-/// Colors, fonts and backgrounds shared by every slide.
+/// Font sizes in points. Body text at level 0 takes `body`; each deeper
+/// level is four points smaller, down to ten points below `body`. When a
+/// slide is full, the layout engine scales body text down, never below
+/// `minimum`.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypeScale {
+    /// The title of a title slide.
+    pub display: u32,
+    pub title: u32,
+    pub subtitle: u32,
+    pub body: u32,
+    pub table: u32,
+    pub minimum: u32,
+}
+
+impl Default for TypeScale {
+    fn default() -> Self {
+        Self {
+            display: 54,
+            title: 44,
+            subtitle: 24,
+            body: 28,
+            table: 16,
+            minimum: 18,
+        }
+    }
+}
+
+impl TypeScale {
+    /// The body size at an indent level.
+    pub fn body_level(&self, level: u8) -> u32 {
+        let stepped = self.body.saturating_sub(4 * level as u32);
+        stepped.max(self.body.saturating_sub(10)).max(1)
+    }
+}
+
+/// Colors, fonts, type scale and backgrounds shared by every slide.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
@@ -779,6 +904,7 @@ pub struct Theme {
     pub major_font: String,
     /// Body font.
     pub minor_font: String,
+    pub scale: TypeScale,
     /// Swap the light and dark slots when the theme is written, so the
     /// background takes `dark1` and text takes `light1`.
     pub inverted: bool,
@@ -806,6 +932,7 @@ impl Theme {
             colors: ColorScheme::default(),
             major_font: "Calibri".to_string(),
             minor_font: "Calibri".to_string(),
+            scale: TypeScale::default(),
             inverted: false,
             background: None,
             layout_backgrounds: Vec::new(),
@@ -963,6 +1090,11 @@ impl Theme {
     pub fn font(self, font: impl Into<String>) -> Self {
         let font = font.into();
         self.fonts(font.clone(), font)
+    }
+
+    pub fn scale(mut self, scale: TypeScale) -> Self {
+        self.scale = scale;
+        self
     }
 
     pub fn inverted(mut self) -> Self {
@@ -1124,6 +1256,11 @@ impl ImageFormat {
         None
     }
 
+    /// Width and height in pixels from the header of a PNG, JPEG, GIF or BMP.
+    pub fn dimensions(data: &[u8]) -> Option<(u32, u32)> {
+        image::dimensions(data)
+    }
+
     pub fn extension(self) -> &'static str {
         match self {
             ImageFormat::Png => "png",
@@ -1150,27 +1287,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn layouts_are_inferred_from_content() {
+    fn type_scale_steps_by_level() {
+        let scale = TypeScale::default();
         assert_eq!(
-            Slide::titled("t").bullet("b").effective_layout(),
-            Layout::TitleAndContent
+            [0, 1, 2, 3, 4, 8].map(|level| scale.body_level(level)),
+            [28, 24, 20, 18, 18, 18]
         );
-        assert_eq!(Slide::titled("t").effective_layout(), Layout::TitleOnly);
-        let mut subtitled = Slide::titled("t");
-        subtitled.subtitle = Some("s".to_string());
-        assert_eq!(subtitled.effective_layout(), Layout::Title);
-        assert_eq!(Slide::new().effective_layout(), Layout::Blank);
-        assert_eq!(
-            Slide::title_slide("t", None).effective_layout(),
-            Layout::Title
-        );
-        assert_eq!(
-            Slide::new()
-                .layout(Layout::Blank)
-                .bullet("x")
-                .effective_layout(),
-            Layout::Blank
-        );
+        let small = TypeScale {
+            body: 6,
+            ..TypeScale::default()
+        };
+        assert_eq!(small.body_level(3), 1);
+        assert_eq!(Theme::office().scale(small).scale.body, 6);
     }
 
     #[test]
