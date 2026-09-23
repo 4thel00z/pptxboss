@@ -706,7 +706,7 @@ pub(crate) fn unpack(packed: &[u8]) -> Vec<u8> {
         if distance >= FAR_DISTANCE {
             copy += 1;
         }
-        let start = here - distance - copy + 1;
+        let start = here + 1 - distance - copy;
         for j in 0..copy {
             data.push(data[start + j]);
         }

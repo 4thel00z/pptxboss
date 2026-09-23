@@ -136,7 +136,7 @@ font, and the layout changes with it. `Theme::embed_font` stores a
 TrueType or OpenType file in the deck as Embedded OpenType, the container
 PowerPoint reads, so the deck renders in that font anywhere. The font data
 is MicroType Express compressed, the way PowerPoint itself stores it, which
-brings a file to roughly a third of its size; a file the coder cannot
+brings a file to a third to a half of its size; a file the coder cannot
 handle is stored as it is. Files of one family fill its regular, bold,
 italic and bold italic slots by the bold and italic flags they declare, so
 a family with more weights than those four keeps the last file given for
