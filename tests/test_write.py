@@ -183,3 +183,19 @@ def test_layout_engine_places_blocks_and_continues() -> None:
     with pytest.raises(ValueError, match="at least one"):
         write.Slide("t").columns()
     assert repr(write.Picture(PNG)).startswith("write.Picture(") and repr(write.Table(rows)) == "write.Table(31 rows)"
+
+
+def test_embedded_fonts_are_written_and_restricted_ones_refused() -> None:
+    root = Path(__file__).resolve().parents[1] / "crates" / "pptxboss-write" / "tests" / "data"
+    regular = (root / "boxy-regular.ttf").read_bytes()
+    bold = (root / "boxy-bold.ttf").read_bytes()
+    theme = write.Theme("boxy", font="Boxy", embed_fonts=[regular]).embed_font(bold)
+    assert theme.embedded_font_count == 2
+    deck = write.Presentation(theme=theme).add(write.Slide("Boxy").bullet("A box"))
+    data = deck.to_bytes()
+    assert pptxboss.check(data=data) == []
+    package = pptxboss.Document(data=data).package()
+    assert "/ppt/fonts/font2.fntdata" in [part.name for part in package.parts()]
+    assert b'<p:font typeface="Boxy"' in package.read("/ppt/presentation.xml")
+    with pytest.raises(pptxboss.PptxError, match="unsupported font"):
+        write.Presentation(theme=write.Theme("x", embed_fonts=[b"<svg/>"])).to_bytes()

@@ -452,3 +452,57 @@ fn placed_content_verifies_clean_and_continues() {
         .iter()
         .any(|shape| matches!(shape.content, Content::Picture(_))));
 }
+
+#[test]
+fn embedded_fonts_are_stored_as_eot_parts() {
+    let regular = include_bytes!("data/boxy-regular.ttf").to_vec();
+    let bold = include_bytes!("data/boxy-bold.ttf").to_vec();
+    let theme = Theme::office()
+        .font("Boxy")
+        .embed_font(regular.clone())
+        .embed_font(bold);
+    let deck = Presentation::new()
+        .theme(theme)
+        .slide(Slide::titled("Boxy").bullet("A box").notes("n"));
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+
+    let doc = Document::load(bytes).unwrap();
+    let package = doc.package().unwrap();
+    let presentation =
+        String::from_utf8(package.read_part("/ppt/presentation.xml").unwrap().to_vec()).unwrap();
+    let list_start = presentation.find("<p:embeddedFontLst>").unwrap();
+    let list_end = presentation.find("</p:embeddedFontLst>").unwrap();
+    let list = &presentation[list_start..list_end];
+    assert!(list.contains(r#"<p:font typeface="Boxy" panose="020B0503020202020204" pitchFamily="34" charset="0"/>"#), "{list}");
+    assert!(
+        list.contains(r#"<p:regular r:id="rId8"/><p:bold r:id="rId9"/>"#),
+        "{list}"
+    );
+    assert!(list_end < presentation.find("<p:defaultTextStyle>").unwrap());
+    let rels = String::from_utf8(
+        package
+            .read_part("/ppt/_rels/presentation.xml.rels")
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(rels.contains(r#"Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata""#), "{rels}");
+    assert_eq!(
+        package.content_type_of("/ppt/fonts/font1.fntdata"),
+        Some("application/x-fontdata")
+    );
+    let font1 = package.read_part("/ppt/fonts/font1.fntdata").unwrap();
+    assert!(font1.ends_with(&regular));
+    assert_eq!(
+        u32::from_le_bytes(font1[8..12].try_into().unwrap()),
+        0x0002_0002
+    );
+
+    let restricted = Presentation::new().theme(Theme::office().embed_font(b"<svg/>".to_vec()));
+    assert!(matches!(
+        restricted.to_bytes(),
+        Err(pptxboss_write::Error::UnsupportedFont(_))
+    ));
+}

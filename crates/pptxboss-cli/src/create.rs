@@ -34,6 +34,9 @@ pub enum Create {
         /// Use the 4:3 slide size instead of widescreen.
         #[arg(long)]
         standard: bool,
+        /// A TrueType or OpenType font file to store in the deck; repeat for more.
+        #[arg(long = "embed-font", value_name = "FILE")]
+        embed_fonts: Vec<PathBuf>,
     },
     /// Slides from a Markdown file: `#` starts a title slide, `##` a content slide,
     /// list items become bullets, `Notes:` starts speaker notes, `---` breaks a slide.
@@ -44,13 +47,32 @@ pub enum Create {
         /// Use the 4:3 slide size instead of widescreen.
         #[arg(long)]
         standard: bool,
-        /// Theme preset: office, dark, slate, forest or sunset.
+        /// Theme preset: office, dark, slate, forest, sunset, midnight, mocha,
+        /// dracula, nord, tokyo, clay or mono.
         #[arg(long)]
         theme: Option<String>,
         /// Font family for titles and body, applied over the theme.
         #[arg(long)]
         font: Option<String>,
+        /// A TrueType or OpenType font file to store in the deck; repeat for more.
+        #[arg(long = "embed-font", value_name = "FILE")]
+        embed_fonts: Vec<PathBuf>,
     },
+}
+
+/// The presentation with each font file read and handed to its theme.
+fn with_embedded_fonts(
+    mut presentation: Presentation,
+    paths: &[PathBuf],
+) -> Result<Presentation, Failure> {
+    for path in paths {
+        let data = std::fs::read(path).map_err(|err| Failure {
+            message: format!("{}: {err}", path.display()),
+            code: 1,
+        })?;
+        presentation.theme = std::mem::take(&mut presentation.theme).embed_font(data);
+    }
+    Ok(presentation)
 }
 
 fn size(standard: bool) -> SlideSize {
@@ -86,6 +108,7 @@ pub fn run(command: Create) -> Result<(), Failure> {
             bullets,
             notes,
             standard,
+            embed_fonts,
         } => {
             let mut slide = Slide::titled(title);
             for bullet in bullets {
@@ -94,7 +117,8 @@ pub fn run(command: Create) -> Result<(), Failure> {
             if let Some(notes) = notes {
                 slide = slide.notes(notes);
             }
-            write(&Presentation::new().size(size(standard)).slide(slide), &out)
+            let presentation = Presentation::new().size(size(standard)).slide(slide);
+            write(&with_embedded_fonts(presentation, &embed_fonts)?, &out)
         }
         Create::Md {
             out,
@@ -102,6 +126,7 @@ pub fn run(command: Create) -> Result<(), Failure> {
             standard,
             theme,
             font,
+            embed_fonts,
         } => {
             let markdown = match input.to_str() == Some("-") {
                 true => std::io::read_to_string(std::io::stdin())?,
@@ -124,7 +149,7 @@ pub fn run(command: Create) -> Result<(), Failure> {
             if let Some(font) = font {
                 presentation = presentation.font(font);
             }
-            write(&presentation, &out)
+            write(&with_embedded_fonts(presentation, &embed_fonts)?, &out)
         }
     }
 }

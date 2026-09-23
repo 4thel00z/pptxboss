@@ -8,6 +8,8 @@
 //! measured with embedded font metrics, blocks stack down the slide or
 //! sit side by side in columns, the type scale shrinks to a floor when a
 //! slide is full, and what still does not fit continues on the next slide.
+//! Font files handed to the theme are stored in the deck as Embedded
+//! OpenType, the form PowerPoint reads.
 //!
 //! Output is deterministic: fixed timestamps, entries in a fixed order,
 //! ids assigned in order of insertion. The result reads back through
@@ -15,6 +17,7 @@
 
 use std::path::Path;
 
+mod fonts;
 mod image;
 mod layout;
 mod markdown;
@@ -51,6 +54,12 @@ pub enum Error {
     /// A background picture is not a format the writer can embed.
     #[error("unsupported image format for background picture")]
     UnsupportedBackgroundImage,
+    /// Font bytes are not a single TrueType or OpenType font.
+    #[error("unsupported font: {0}")]
+    UnsupportedFont(String),
+    /// The font's license forbids embedding it (OS/2 fsType restricted).
+    #[error("font {0:?} does not permit embedding")]
+    FontEmbeddingRestricted(String),
     #[error("{0}")]
     Other(String),
 }
@@ -911,6 +920,9 @@ pub struct Theme {
     /// Master background; None writes the theme background reference.
     pub background: Option<Background>,
     pub layout_backgrounds: Vec<LayoutBackground>,
+    /// TrueType or OpenType font files stored in the deck, so viewers
+    /// without the fonts installed still render it in them.
+    pub embedded_fonts: Vec<Vec<u8>>,
 }
 
 impl Default for Theme {
@@ -936,6 +948,7 @@ impl Theme {
             inverted: false,
             background: None,
             layout_backgrounds: Vec::new(),
+            embedded_fonts: Vec::new(),
         }
     }
 
@@ -1123,6 +1136,15 @@ impl Theme {
             background,
             inverted,
         });
+        self
+    }
+
+    /// Stores a font file (TrueType or OpenType) in the deck. Files of one
+    /// family fill its regular, bold, italic and bold italic slots by the
+    /// style the font declares. Writing fails for a font whose license
+    /// forbids embedding.
+    pub fn embed_font(mut self, data: Vec<u8>) -> Self {
+        self.embedded_fonts.push(data);
         self
     }
 

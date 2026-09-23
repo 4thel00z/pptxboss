@@ -532,7 +532,7 @@ class write:
         def picture(data: bytes) -> write.Background: ...
 
     class Theme:
-        """Colors, fonts, type scale and backgrounds shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB; sizes maps display, title, subtitle, body, table and minimum to points."""
+        """Colors, fonts, type scale, backgrounds and embedded fonts shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB; sizes maps display, title, subtitle, body, table and minimum to points; embed_fonts holds TrueType or OpenType files stored in the deck."""
 
         def __init__(
             self,
@@ -545,6 +545,7 @@ class write:
             sizes: dict[str, int] | None = None,
             inverted: bool = False,
             background: write.Background | None = None,
+            embed_fonts: list[bytes] | None = None,
         ) -> None: ...
         @staticmethod
         def preset(name: str) -> write.Theme:
@@ -552,6 +553,10 @@ class write:
         @staticmethod
         def presets() -> list[str]: ...
         def layout_background(self, layout: str, background: write.Background, *, inverted: bool = False) -> write.Theme: ...
+        def embed_font(self, data: bytes) -> write.Theme:
+            """Stores a TrueType or OpenType font file in the deck; saving fails for a font whose license forbids embedding."""
+        @property
+        def embedded_font_count(self) -> int: ...
         @property
         def name(self) -> str: ...
         @property
