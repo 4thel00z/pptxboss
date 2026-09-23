@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/4thel00z/pptxboss/compare/v2.1.0...v2.2.0) (2026-09-23)
+
+
+### Features
+
+* **write:** compress embedded fonts as MicroType Express ([#16](https://github.com/4thel00z/pptxboss/issues/16)) ([550cd16](https://github.com/4thel00z/pptxboss/commit/550cd1686606cb40151ff1ffb4c8b4f6b9c15d39))
+
 ## [2.1.0](https://github.com/4thel00z/pptxboss/compare/v2.0.0...v2.1.0) (2026-09-23)
 
 
