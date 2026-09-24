@@ -187,9 +187,11 @@ deck.write_to("review.pptx")?;
 ```
 
 Content without coordinates is placed by the layout engine: it measures
-text with embedded font metrics, stacks blocks or sets them in columns,
-shrinks body text to the theme's minimum when a slide is full, and
-continues what is left on the next slide. `Theme::embed_font` stores a
+text with embedded font metrics, stacks blocks (text, pictures, tables,
+key numbers, pull quotes) or sets them in columns, shrinks body text to
+the theme's minimum when a slide is full, and continues what is left on
+the next slide. Section slides and a footer band with the slide number
+come from `Slide::section` and `Theme::footer`. `Theme::embed_font` stores a
 TrueType or OpenType file in the deck, compressed the way PowerPoint
 stores its own embedded fonts, so it renders in that font on machines
 that lack it. Output is deterministic (fixed timestamps, fixed

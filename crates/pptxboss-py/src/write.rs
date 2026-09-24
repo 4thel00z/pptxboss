@@ -27,10 +27,11 @@ fn layout_from(name: Option<&str>) -> PyResult<Option<Layout>> {
         Some("title_and_content") | Some("content") => Some(Layout::TitleAndContent),
         Some("title_only") => Some(Layout::TitleOnly),
         Some("blank") => Some(Layout::Blank),
+        Some("section") => Some(Layout::Section),
         Some(other) => {
             return Err(PyValueError::new_err(format!(
-                "unknown layout {other:?}; use title, title_and_content, title_only or blank"
-            )))
+            "unknown layout {other:?}; use title, title_and_content, title_only, blank or section"
+        )))
         }
     })
 }
@@ -450,7 +451,7 @@ pub struct Theme {
 #[pymethods]
 impl Theme {
     #[new]
-    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, sizes=None, inverted=false, background=None, embed_fonts=None))]
+    #[pyo3(signature = (name="pptxboss", *, colors=None, major_font=None, minor_font=None, font=None, sizes=None, inverted=false, background=None, embed_fonts=None, footer=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         name: &str,
@@ -462,10 +463,14 @@ impl Theme {
         inverted: bool,
         background: Option<Background>,
         embed_fonts: Option<Vec<Vec<u8>>>,
+        footer: Option<String>,
     ) -> PyResult<Self> {
         let mut inner = CoreTheme::new(name);
         for data in embed_fonts.unwrap_or_default() {
             inner = inner.embed_font(data);
+        }
+        if let Some(footer) = footer {
+            inner = inner.footer(footer);
         }
         if let Some(sizes) = sizes {
             inner = inner.scale(scale_from(sizes)?);
@@ -526,6 +531,18 @@ impl Theme {
     }
 
     /// The number of embedded font files.
+    /// Shows a footer band with `text` and the slide number on every
+    /// slide outside the title and section layouts.
+    fn footer(mut slf: PyRefMut<'_, Self>, text: String) -> PyRefMut<'_, Self> {
+        slf.inner = std::mem::take(&mut slf.inner).footer(text);
+        slf
+    }
+
+    #[getter]
+    fn footer_text(&self) -> Option<String> {
+        self.inner.footer.clone()
+    }
+
     #[getter]
     fn embedded_font_count(&self) -> usize {
         self.inner.embedded_fonts.len()
@@ -662,13 +679,78 @@ impl Table {
     }
 }
 
+/// A figure at display size in the first accent color over a short label;
+/// several side by side make a row of key numbers.
+#[pyclass(module = "pptxboss.write")]
+#[derive(Clone)]
+pub struct Stat {
+    value: String,
+    label: String,
+}
+
+#[pymethods]
+impl Stat {
+    #[new]
+    fn new(value: String, label: String) -> Self {
+        Self { value, label }
+    }
+
+    #[getter]
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+
+    #[getter]
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("write.Stat({:?}, {:?})", self.value, self.label)
+    }
+}
+
+/// A pull quote: italic text beside a rule in the first accent color, with
+/// an optional attribution below.
+#[pyclass(module = "pptxboss.write")]
+#[derive(Clone)]
+pub struct Quote {
+    text: String,
+    attribution: Option<String>,
+}
+
+#[pymethods]
+impl Quote {
+    #[new]
+    #[pyo3(signature = (text, attribution=None))]
+    fn new(text: String, attribution: Option<String>) -> Self {
+        Self { text, attribution }
+    }
+
+    #[getter]
+    fn text(&self) -> String {
+        self.text.clone()
+    }
+
+    #[getter]
+    fn attribution(&self) -> Option<String> {
+        self.attribution.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("write.Quote({:?})", self.text)
+    }
+}
+
 /// A block for the layout engine: lines of text (strings become bullets,
-/// a `Paragraph` keeps its own formatting), a `Picture`, a `Table`, or a
-/// list of blocks set side by side.
+/// a `Paragraph` keeps its own formatting), a `Picture`, a `Table`, a
+/// `Stat`, a `Quote`, or a list of blocks set side by side.
 #[derive(FromPyObject)]
 enum BlockArg {
     Picture(Picture),
     Table(Table),
+    Stat(Stat),
+    Quote(Quote),
     Lines(Vec<Line>),
     Columns(Vec<BlockArg>),
 }
@@ -680,6 +762,8 @@ fn block_from(block: BlockArg) -> Block {
             description: picture.description,
         },
         BlockArg::Table(table) => Block::table(table.rows, table.header),
+        BlockArg::Stat(stat) => Block::stat(stat.value, stat.label),
+        BlockArg::Quote(quote) => Block::quote(quote.text, quote.attribution.as_deref()),
         BlockArg::Lines(lines) => Block::text(
             lines
                 .into_iter()
@@ -749,6 +833,15 @@ impl Slide {
         inner.background = background.map(|background| background.inner);
         inner.inverted = inverted;
         Ok(Self { inner })
+    }
+
+    /// A section divider: the title alone on the section layout, which
+    /// fills the slide with the first accent color.
+    #[staticmethod]
+    fn section(title: String) -> Self {
+        Self {
+            inner: CoreSlide::section(title),
+        }
     }
 
     /// Adds a bullet to the body placeholder; `text` is a string or a list
@@ -1053,6 +1146,8 @@ pub fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Background>()?;
     module.add_class::<Picture>()?;
     module.add_class::<Table>()?;
+    module.add_class::<Stat>()?;
+    module.add_class::<Quote>()?;
     module.add_function(wrap_pyfunction!(from_markdown, &module)?)?;
     parent.add_submodule(&module)?;
     py.import("sys")?

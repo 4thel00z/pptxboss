@@ -346,10 +346,10 @@ fn themes_and_backgrounds_verify_clean() {
     ));
     let master = part("/ppt/slideMasters/slideMaster1.xml");
     assert!(master.contains(r#"<p:clrMap bg1="lt1" tx1="dk1""#));
-    assert!(master.contains(r#"<a:blip r:embed="rId6"/>"#));
+    assert!(master.contains(r#"<a:blip r:embed="rId7"/>"#));
     assert_eq!(
         package
-            .resolve("/ppt/slideMasters/slideMaster1.xml", "rId6")
+            .resolve("/ppt/slideMasters/slideMaster1.xml", "rId7")
             .unwrap()
             .as_deref(),
         Some("/ppt/media/image1.png")
@@ -358,6 +358,7 @@ fn themes_and_backgrounds_verify_clean() {
         r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="101010"/></a:gs><a:gs pos="100000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
     ));
     assert!(part("/ppt/slideLayouts/slideLayout2.xml").contains("<a:masterClrMapping/>"));
+    assert!(!part("/ppt/slides/slide1.xml").contains("<p:bg>"));
     let inverted = part("/ppt/slides/slide2.xml");
     assert!(inverted.contains(
         r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
@@ -507,4 +508,84 @@ fn embedded_fonts_are_stored_as_eot_parts() {
         restricted.to_bytes(),
         Err(pptxboss_write::Error::UnsupportedFont(_))
     ));
+}
+
+#[test]
+fn sections_stats_quotes_and_footers_verify_clean_and_read_back() {
+    let mut agenda = Slide::titled("Agenda");
+    for i in 0..30 {
+        agenda = agenda.bullet(format!("Item {i}: something that takes a line"));
+    }
+    let deck = Presentation::new()
+        .theme(Theme::office().footer("Platform review"))
+        .slide(Slide::title_slide("Deck", Some("Subtitle")))
+        .slide(Slide::section("Part one"))
+        .slide(
+            Slide::titled("Numbers")
+                .columns(vec![
+                    Block::stat("86%", "fewer cold starts"),
+                    Block::stat("0", "findings"),
+                ])
+                .block(Block::quote("It just opened.", Some("A reviewer"))),
+        )
+        .slide(agenda);
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+
+    let doc = Document::load(bytes).unwrap();
+    assert!(doc.slide_count() >= 5, "{} slides", doc.slide_count());
+    let section = doc.slide(1).unwrap();
+    assert_eq!(section.title().as_deref(), Some("Part one"));
+    assert_eq!(section.text(), "Part one");
+    let numbers = doc.slide(2).unwrap();
+    assert_eq!(
+        numbers.text(),
+        "Numbers\n86%\nfewer cold starts\n0\nfindings\nIt just opened.\nA reviewer"
+    );
+    for index in 0..doc.slide_count() {
+        let slide = doc.slide(index).unwrap();
+        let furniture: Vec<String> = slide
+            .content
+            .shapes
+            .iter()
+            .filter(|shape| {
+                shape
+                    .placeholder
+                    .as_ref()
+                    .is_some_and(|ph| ph.kind.is_furniture())
+            })
+            .filter_map(|shape| match &shape.content {
+                Content::Text(body) => Some(body.text()),
+                _ => None,
+            })
+            .collect();
+        match index {
+            0 | 1 => assert!(furniture.is_empty(), "slide {index}: {furniture:?}"),
+            _ => assert_eq!(
+                furniture,
+                vec!["Platform review".to_string(), (index + 1).to_string()],
+                "slide {index}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn inverted_slides_without_a_background_keep_their_own_fill() {
+    let deck = Presentation::new()
+        .slide(Slide::titled("Plain").bullet("x"))
+        .slide(Slide::titled("Inverted").inverted().bullet("x"));
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let package = doc.package().unwrap();
+    let part = |name: &str| String::from_utf8(package.read_part(name).unwrap().to_vec()).unwrap();
+    assert!(!part("/ppt/slides/slide1.xml").contains("<p:bg>"));
+    let inverted = part("/ppt/slides/slide2.xml");
+    assert!(
+        inverted.contains(r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#)
+    );
+    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="dk1" tx1="lt1""#));
 }

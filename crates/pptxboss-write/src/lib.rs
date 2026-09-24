@@ -108,6 +108,9 @@ pub enum Layout {
     TitleOnly,
     /// No placeholders.
     Blank,
+    /// A section divider: the title alone, left-aligned above the middle
+    /// of a slide filled with the first accent color.
+    Section,
 }
 
 impl Layout {
@@ -117,7 +120,21 @@ impl Layout {
             Layout::TitleAndContent => 2,
             Layout::TitleOnly => 3,
             Layout::Blank => 4,
+            Layout::Section => 5,
         }
+    }
+
+    pub(crate) const ALL: [Layout; 5] = [
+        Layout::Title,
+        Layout::TitleAndContent,
+        Layout::TitleOnly,
+        Layout::Blank,
+        Layout::Section,
+    ];
+
+    /// Whether slides on this layout carry the footer band.
+    pub(crate) fn has_footer(self) -> bool {
+        !matches!(self, Layout::Title | Layout::Section)
     }
 }
 
@@ -516,6 +533,17 @@ pub enum Block {
         header: bool,
     },
     Columns(Vec<Block>),
+    /// A large figure over a short label.
+    Stat {
+        value: String,
+        label: String,
+    },
+    /// A pull quote: italic text beside a rule in the first accent color,
+    /// with an optional attribution below.
+    Quote {
+        text: String,
+        attribution: Option<String>,
+    },
 }
 
 impl Block {
@@ -558,6 +586,23 @@ impl Block {
     pub fn columns(blocks: Vec<Block>) -> Self {
         Block::Columns(blocks)
     }
+
+    /// A figure at display size in the first accent color over a label;
+    /// several in a `columns` block make a row of key numbers.
+    pub fn stat(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Block::Stat {
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+
+    /// A pull quote with an optional attribution.
+    pub fn quote(text: impl Into<String>, attribution: Option<&str>) -> Self {
+        Block::Quote {
+            text: text.into(),
+            attribution: attribution.map(str::to_string),
+        }
+    }
 }
 
 /// One slide under construction.
@@ -597,6 +642,15 @@ impl Slide {
 
     pub fn titled(title: impl Into<String>) -> Self {
         Self {
+            title: Some(title.into()),
+            ..Self::default()
+        }
+    }
+
+    /// A section divider: the title alone on the `Section` layout.
+    pub fn section(title: impl Into<String>) -> Self {
+        Self {
+            layout: Some(Layout::Section),
             title: Some(title.into()),
             ..Self::default()
         }
@@ -925,6 +979,10 @@ pub struct Theme {
     /// TrueType or OpenType font files stored in the deck, so viewers
     /// without the fonts installed still render it in them.
     pub embedded_fonts: Vec<Vec<u8>>,
+    /// Text of the footer band; when set, every slide outside the title
+    /// and section layouts shows it at the bottom left and its slide
+    /// number at the bottom right.
+    pub footer: Option<String>,
 }
 
 impl Default for Theme {
@@ -951,6 +1009,7 @@ impl Theme {
             background: None,
             layout_backgrounds: Vec::new(),
             embedded_fonts: Vec::new(),
+            footer: None,
         }
     }
 
@@ -1147,6 +1206,13 @@ impl Theme {
     /// forbids embedding.
     pub fn embed_font(mut self, data: Vec<u8>) -> Self {
         self.embedded_fonts.push(data);
+        self
+    }
+
+    /// Shows a footer band with `text` and the slide number on every
+    /// slide outside the title and section layouts.
+    pub fn footer(mut self, text: impl Into<String>) -> Self {
+        self.footer = Some(text.into());
         self
     }
 

@@ -7,7 +7,9 @@
 use std::borrow::Cow;
 
 use crate::metrics::{line_count, Face, Font};
-use crate::{Block, Layout, Paragraph, Rect, Run, Shape, Slide, SlideSize, Theme};
+use crate::{
+    Block, Color, Layout, Paragraph, Rect, Run, SchemeColor, Shape, Slide, SlideSize, Theme,
+};
 
 /// Horizontal inset of a text body on each side, in EMU.
 const INSET_X: i64 = 91_440;
@@ -25,6 +27,14 @@ const PICTURE_MIN: i64 = 914_400;
 const BODY_SPACING: u32 = 90;
 /// Steps the body scale takes on the way down to the minimum, in percent.
 const SCALE_STEP: u32 = 5;
+/// Width of the rule beside a quote, in EMU.
+const QUOTE_BAR: i64 = 54_864;
+/// Space between the rule and the quote's text, in EMU.
+const QUOTE_GAP: i64 = 182_880;
+/// Height of the footer band, in EMU.
+const FOOTER_HEIGHT: i64 = 365_125;
+/// Distance from the bottom of the slide to the top of the footer band, in EMU.
+const FOOTER_RISE: i64 = 501_650;
 
 /// The geometry every slide shares, derived from the slide size.
 pub(crate) struct Grid {
@@ -34,6 +44,10 @@ pub(crate) struct Grid {
     pub(crate) subtitle: Rect,
     /// The content area of a slide without a title.
     pub(crate) page: Rect,
+    /// The footer text at the bottom left.
+    pub(crate) footer: Rect,
+    /// The slide number at the bottom right.
+    pub(crate) slide_number: Rect,
     pub(crate) gutter: i64,
 }
 
@@ -54,6 +68,13 @@ impl Grid {
                 1_655_762,
             ),
             page: Rect::new(margin, top, width, size.cy - top - bottom),
+            footer: Rect::new(margin, size.cy - FOOTER_RISE, width * 2 / 3, FOOTER_HEIGHT),
+            slide_number: Rect::new(
+                margin + width * 2 / 3,
+                size.cy - FOOTER_RISE,
+                width / 3,
+                FOOTER_HEIGHT,
+            ),
             gutter: size.cx / 40,
         }
     }
@@ -61,7 +82,8 @@ impl Grid {
     /// `area` divided into columns by weight with a gutter between neighbors.
     fn split(&self, area: Rect, weights: &[i64]) -> Vec<Rect> {
         let total: i64 = weights.iter().sum::<i64>().max(1);
-        let usable = area.cx - self.gutter * (weights.len() as i64 - 1);
+        let count = weights.len() as i64;
+        let usable = (area.cx - self.gutter * (count - 1)).max(count);
         let mut x = area.x;
         weights
             .iter()
@@ -97,6 +119,14 @@ enum Item<'a> {
         header: bool,
     },
     Columns(Vec<Item<'a>>),
+    Stat {
+        value: &'a str,
+        label: &'a str,
+    },
+    Quote {
+        text: &'a str,
+        attribution: Option<&'a str>,
+    },
 }
 
 impl<'a> Item<'a> {
@@ -114,6 +144,11 @@ impl<'a> Item<'a> {
             Block::Columns(children) => {
                 Item::Columns(children.iter().map(Item::from_block).collect())
             }
+            Block::Stat { value, label } => Item::Stat { value, label },
+            Block::Quote { text, attribution } => Item::Quote {
+                text,
+                attribution: attribution.as_deref(),
+            },
         }
     }
 
@@ -150,6 +185,8 @@ pub(crate) enum Element<'a> {
         /// Cell text size in points.
         size: u32,
     },
+    /// A filled rectangle without text.
+    Bar { rect: Rect, color: Color },
     /// Content at a fixed position, written as given.
     Shape(&'a Shape),
 }
@@ -160,6 +197,8 @@ pub(crate) struct Planned<'a> {
     pub(crate) layout: Layout,
     /// The title's size in points when it had to shrink to fit its frame.
     pub(crate) title_size: Option<u32>,
+    /// The subtitle's size in points when it had to shrink to fit its frame.
+    pub(crate) subtitle_size: Option<u32>,
     pub(crate) elements: Vec<Element<'a>>,
     pub(crate) notes: Option<&'a str>,
 }
@@ -243,6 +282,32 @@ impl<'t> Engine<'t> {
             .collect()
     }
 
+    /// The figure at display size in the first accent color over its label.
+    fn stat_paragraphs(&self, value: &str, label: &str) -> Vec<Paragraph> {
+        let scale = &self.theme.scale;
+        vec![
+            Paragraph::runs(vec![Run::text(value)
+                .bold()
+                .size(scale.display)
+                .color(Color::Scheme(SchemeColor::Accent1))])
+            .space_before(0),
+            Paragraph::text(label).size(scale.subtitle).space_before(4),
+        ]
+    }
+
+    /// Italic text at body size with the attribution below at a smaller size.
+    fn quote_paragraphs(&self, text: &str, attribution: Option<&str>) -> Vec<Paragraph> {
+        let scale = &self.theme.scale;
+        let mut paragraphs =
+            vec![Paragraph::runs(vec![Run::text(text).italic().size(scale.body)]).space_before(0)];
+        paragraphs.extend(attribution.map(|attribution| {
+            Paragraph::text(attribution)
+                .size(scale.body_level(2))
+                .space_before(8)
+        }));
+        paragraphs
+    }
+
     fn picture_aspect(data: &[u8]) -> (i64, i64) {
         match crate::image::dimensions(data) {
             Some((w, h)) => (w as i64, h as i64),
@@ -298,6 +363,21 @@ impl<'t> Engine<'t> {
                 Measured {
                     natural,
                     minimum: natural.min(PICTURE_MIN),
+                }
+            }
+            Item::Stat { value, label } => {
+                let height = self.text_height(&self.stat_paragraphs(value, label), width, scale);
+                Measured {
+                    natural: height,
+                    minimum: height,
+                }
+            }
+            Item::Quote { text, attribution } => {
+                let paragraphs = self.quote_paragraphs(text, *attribution);
+                let height = self.text_height(&paragraphs, width - QUOTE_BAR - QUOTE_GAP, scale);
+                Measured {
+                    natural: height,
+                    minimum: height,
                 }
             }
             Item::Columns(children) => {
@@ -567,23 +647,65 @@ impl<'t> Engine<'t> {
                     .flat_map(|(child, column)| self.elements(child, column, scale, false))
                     .collect()
             }
+            Item::Stat { value, label } => vec![Element::TextBox {
+                paragraphs: scaled_paragraphs(&self.stat_paragraphs(value, label), scale),
+                rect,
+                scale,
+            }],
+            Item::Quote { text, attribution } => {
+                let paragraphs =
+                    scaled_paragraphs(&self.quote_paragraphs(text, attribution), scale);
+                let text_rect = Rect::new(
+                    rect.x + QUOTE_BAR + QUOTE_GAP,
+                    rect.y,
+                    rect.cx - QUOTE_BAR - QUOTE_GAP,
+                    rect.cy,
+                );
+                let height = self.text_height(&paragraphs, text_rect.cx, 100);
+                vec![
+                    Element::Bar {
+                        rect: Rect::new(rect.x, rect.y + INSET_Y, QUOTE_BAR, height - 2 * INSET_Y),
+                        color: Color::Scheme(SchemeColor::Accent1),
+                    },
+                    Element::TextBox {
+                        paragraphs,
+                        rect: text_rect,
+                        scale,
+                    },
+                ]
+            }
         }
     }
 
     /// The title size that fits its frame, or None when the theme's size does.
     fn title_size(&self, title: &str, layout: Layout) -> Option<u32> {
         let (frame, size) = match layout {
-            Layout::Title => (self.grid.center_title, self.theme.scale.display),
+            Layout::Title | Layout::Section => (self.grid.center_title, self.theme.scale.display),
             _ => (self.grid.title, self.theme.scale.title),
         };
-        let face = Face::for_font(&self.theme.major_font);
+        self.fitted_size(title, frame, size, Face::for_font(&self.theme.major_font))
+    }
+
+    /// The subtitle size that fits its frame, or None when the theme's size does.
+    fn subtitle_size(&self, subtitle: &str) -> Option<u32> {
+        self.fitted_size(
+            subtitle,
+            self.grid.subtitle,
+            self.theme.scale.subtitle,
+            self.body_face,
+        )
+    }
+
+    /// The size, stepping down two points at a time from `size` to the
+    /// theme's minimum, at which `text` fits `frame`; None when `size` does.
+    fn fitted_size(&self, text: &str, frame: Rect, size: u32, face: Face) -> Option<u32> {
         let fits = |size: u32| {
             let font = Font {
                 face,
                 bold: false,
                 size,
             };
-            let paragraph = Paragraph::text(title);
+            let paragraph = Paragraph::text(text);
             let lines = line_count(&paragraph, frame.cx - 2 * INSET_X, &|_| font) as i64;
             lines * font.line_height(BODY_SPACING) + 2 * INSET_Y <= frame.cy
         };
@@ -644,6 +766,10 @@ pub(crate) fn plan<'a>(slide: &'a Slide, grid: &Grid, theme: &Theme) -> Vec<Plan
     }
     items.extend(slide.blocks.iter().map(Item::from_block));
     let shapes = || slide.shapes.iter().map(Element::Shape);
+    let subtitle_size = slide
+        .subtitle
+        .as_deref()
+        .and_then(|subtitle| engine.subtitle_size(subtitle));
     if items.is_empty() {
         let layout = slide.layout_for(false);
         return vec![Planned {
@@ -653,6 +779,7 @@ pub(crate) fn plan<'a>(slide: &'a Slide, grid: &Grid, theme: &Theme) -> Vec<Plan
                 .title
                 .as_deref()
                 .and_then(|title| engine.title_size(title, layout)),
+            subtitle_size,
             elements: shapes().collect(),
             notes: slide.notes.as_deref(),
         }];
@@ -684,6 +811,7 @@ pub(crate) fn plan<'a>(slide: &'a Slide, grid: &Grid, theme: &Theme) -> Vec<Plan
                 .title
                 .as_deref()
                 .and_then(|title| engine.title_size(title, layout)),
+            subtitle_size,
             elements,
             notes: slide.notes.as_deref().filter(|_| first),
         });
@@ -707,6 +835,7 @@ mod tests {
             Element::TextBox { rect, .. } => *rect,
             Element::Picture { rect, .. } => *rect,
             Element::Table { rect, .. } => *rect,
+            Element::Bar { rect, .. } => *rect,
             Element::Shape(_) => panic!("shape"),
         }
     }
@@ -733,15 +862,158 @@ mod tests {
     #[test]
     fn grid_splits_by_weight_with_gutters() {
         let grid = widescreen();
-        let area = Rect::new(0, 0, 10_000, 100);
+        let area = Rect::new(0, 0, 10_000_000, 100);
         let halves = grid.split(area, &[1, 1]);
         assert_eq!(halves[0].x, 0);
-        assert_eq!(halves[0].cx, (10_000 - grid.gutter) / 2);
+        assert_eq!(halves[0].cx, (10_000_000 - grid.gutter) / 2);
         assert_eq!(halves[1].x, halves[0].cx + grid.gutter);
         let sevens = grid.split(area, &[7, 5]);
-        assert_eq!(sevens[0].cx, (10_000 - grid.gutter) * 7 / 12);
+        assert_eq!(sevens[0].cx, (10_000_000 - grid.gutter) * 7 / 12);
         assert_eq!(grid.page.y, 457_200);
         assert!(grid.page.cy > grid.body.cy);
+        let crowded = grid.split(Rect::new(0, 0, 10_000, 100), &[1; 60]);
+        assert_eq!(crowded.len(), 60);
+        assert!(crowded.iter().all(|column| column.cx >= 1));
+        assert!(grid.footer.y >= grid.body.y + grid.body.cy);
+        assert!(grid.footer.y >= grid.page.y + grid.page.cy);
+        assert_eq!(grid.slide_number.x, grid.footer.x + grid.footer.cx);
+        assert_eq!(
+            grid.slide_number.x + grid.slide_number.cx,
+            grid.body.x + grid.body.cx
+        );
+    }
+
+    #[test]
+    fn stats_and_quotes_become_boxes_that_move_whole() {
+        let grid = widescreen();
+        let theme = Theme::office();
+        let slide = Slide::titled("Numbers")
+            .columns(vec![
+                Block::stat("86%", "fewer cold starts"),
+                Block::stat("1,240", "decks verified"),
+                Block::stat("0", "findings"),
+            ])
+            .block(Block::quote(
+                "The deck opened in the right font on a machine that had never seen it.",
+                Some("A reviewer"),
+            ));
+        let planned = plan(&slide, &grid, &theme);
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].layout, Layout::TitleOnly);
+        let elements = &planned[0].elements;
+        assert_eq!(elements.len(), 5);
+        for element in &elements[..3] {
+            match element {
+                Element::TextBox { paragraphs, .. } => {
+                    assert_eq!(paragraphs.len(), 2);
+                    assert_eq!(paragraphs[0].runs[0].size, Some(theme.scale.display));
+                    assert_eq!(
+                        paragraphs[0].runs[0].color,
+                        Some(Color::Scheme(SchemeColor::Accent1))
+                    );
+                }
+                _ => panic!("stat box expected"),
+            }
+        }
+        let rects: Vec<Rect> = elements.iter().map(rect_of).collect();
+        assert_eq!(rects[0].y, rects[2].y);
+        assert_eq!(rects[0].x, grid.body.x);
+        let (bar, quote) = (rects[3], rects[4]);
+        assert!(matches!(
+            elements[3],
+            Element::Bar {
+                color: Color::Scheme(SchemeColor::Accent1),
+                ..
+            }
+        ));
+        assert_eq!(bar.x, grid.body.x);
+        assert_eq!(bar.cx, QUOTE_BAR);
+        assert_eq!(quote.x, bar.x + QUOTE_BAR + QUOTE_GAP);
+        assert!(bar.y >= quote.y && bar.y + bar.cy <= quote.y + quote.cy);
+        match &elements[4] {
+            Element::TextBox { paragraphs, .. } => {
+                assert!(paragraphs[0].runs[0].italic);
+                assert_eq!(paragraphs[1].plain_text(), "A reviewer");
+            }
+            _ => panic!("quote box expected"),
+        }
+        for (i, a) in rects.iter().enumerate() {
+            assert!(inside(*a, grid.body), "{a:?}");
+            for b in &rects[i + 1..] {
+                assert!(!overlap(*a, *b), "{a:?} overlaps {b:?}");
+            }
+        }
+
+        let mut crowded = Slide::titled("Crowded");
+        for i in 0..40 {
+            crowded = crowded.bullet(format!("Filler line {i} to push the quote off the slide"));
+        }
+        crowded = crowded.block(Block::quote("Kept whole", None));
+        let planned = plan(&crowded, &grid, &theme);
+        let quotes = planned
+            .iter()
+            .flat_map(|p| p.elements.iter())
+            .filter(|element| matches!(element, Element::Bar { .. }))
+            .count();
+        assert_eq!(quotes, 1);
+    }
+
+    #[test]
+    fn section_slides_and_long_subtitles_fit_their_frames() {
+        let grid = widescreen();
+        let theme = Theme::office();
+        let divider = Slide::section("Part two");
+        let section = plan(&divider, &grid, &theme);
+        assert_eq!(section.len(), 1);
+        assert_eq!(section[0].layout, Layout::Section);
+        assert!(section[0].title_size.is_none());
+        assert!(section[0].elements.is_empty());
+        assert!(!Layout::Section.has_footer() && Layout::TitleOnly.has_footer());
+
+        let long = "far beyond the frame ".repeat(20);
+        let wordy = Slide::title_slide("Deck", Some(&long));
+        let planned = plan(&wordy, &grid, &theme);
+        let size = planned[0].subtitle_size.expect("shrunk subtitle");
+        assert!((18..24).contains(&size), "{size}");
+        let short = Slide::title_slide("Deck", Some("Short"));
+        assert!(plan(&short, &grid, &theme)[0].subtitle_size.is_none());
+    }
+
+    #[test]
+    fn standard_size_slides_keep_every_block_inside() {
+        let grid = Grid::for_size(SlideSize::STANDARD);
+        let theme = Theme::office();
+        let mut rows = vec![vec!["Deck".to_string(), "Slides".to_string()]];
+        rows.extend((0..20).map(|i| vec![format!("deck-{i}"), i.to_string()]));
+        let slide = Slide::titled("Standard")
+            .paragraph("A paragraph above a table, a picture column and a row of numbers.")
+            .block(Block::table(rows, true))
+            .columns(vec![
+                Block::bullets(["left one", "left two", "left three"]),
+                Block::picture(png(1200, 800)),
+            ])
+            .columns(vec![
+                Block::stat("4:3", "slide size"),
+                Block::stat("9,144,000", "EMU wide"),
+            ]);
+        let planned = plan(&slide, &grid, &theme);
+        assert!(planned.len() >= 2, "{} slides", planned.len());
+        for p in &planned {
+            let rects: Vec<Rect> = p
+                .elements
+                .iter()
+                .filter(|element| !matches!(element, Element::Shape(_)))
+                .map(rect_of)
+                .collect();
+            assert!(!rects.is_empty());
+            for (i, a) in rects.iter().enumerate() {
+                assert!(inside(*a, grid.body), "{a:?} outside {:?}", grid.body);
+                assert!(a.y + a.cy <= grid.footer.y, "{a:?} reaches the footer");
+                for b in &rects[i + 1..] {
+                    assert!(!overlap(*a, *b), "{a:?} overlaps {b:?}");
+                }
+            }
+        }
     }
 
     #[test]

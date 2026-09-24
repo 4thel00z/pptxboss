@@ -68,12 +68,41 @@ Slide::titled("Text beside a picture")
 ```
 
 A `Block` is text (`Block::text`, `Block::bullets`), a picture
-(`Block::picture`), a table (`Block::table`) or `Block::columns`, which
+(`Block::picture`), a table (`Block::table`), a key number
+(`Block::stat`), a pull quote (`Block::quote`) or `Block::columns`, which
 sets its children side by side: two children of which one is a picture
 split seven to five in the text's favor, otherwise columns are equal.
 Blocks stack below the body in the order they are added. A picture keeps
 its aspect ratio inside its column; a table sizes each row to its cells.
 Pictures, tables and text boxes given a `Rect` stay where they are put.
+
+A stat is a figure at display size in the first accent color over a label
+at subtitle size; three stats in a `columns` block make a row of key
+numbers. A quote is italic body text beside a rule in the first accent
+color, with the attribution below at a smaller size. Both shrink with the
+body and move whole to the next slide, never cut.
+
+```rust
+use pptxboss_write::{Block, Slide, Theme};
+
+let theme = Theme::nord().footer("Platform review");
+let section = Slide::section("The numbers");
+let numbers = Slide::titled("What changed")
+    .columns(vec![
+        Block::stat("86%", "fewer cold starts"),
+        Block::stat("1,240", "decks verified"),
+        Block::stat("0", "findings"),
+    ])
+    .block(Block::quote("It opened in the right font.", Some("A reviewer")));
+```
+
+`Slide::section` puts the title alone on the `Section` layout: the slide
+is filled with the first accent color, the text colors swap as on an
+inverted slide, and the title sits left-aligned above the middle at
+display size. `Theme::footer` adds a footer band: the text at the bottom
+left and the slide number at the bottom right of every slide outside the
+title and section layouts, continuation slides included. A subtitle that
+does not fit its frame shrinks like a title.
 
 The type scale lives on the theme: `TypeScale { display, title, subtitle,
 body, table, minimum }` in points, with defaults of 54, 44, 24, 28, 16 and
@@ -186,13 +215,21 @@ Content without coordinates goes to the layout engine: `slide.picture(data)`
 and `slide.table(rows)` place themselves, `slide.columns(...)` sets blocks
 side by side and `slide.block(...)` stacks one. A block is a list of lines
 (strings become bullets, a `Paragraph` keeps its formatting), a
-`write.Picture`, a `write.Table` or a list of blocks.
+`write.Picture`, a `write.Table`, a `write.Stat`, a `write.Quote` or a
+list of blocks. `write.Slide.section(title)` is a section divider and
+`write.Theme(footer="...")` or `theme.footer("...")` adds the footer band.
 
 ```python
 deck.add(
     write.Slide("Text beside a picture")
     .columns(["Seven twelfths for the text", "Five for the picture"], write.Picture(chart_png, description="cold starts"))
     .table(rows)
+)
+deck.add(write.Slide.section("The numbers"))
+deck.add(
+    write.Slide("What changed")
+    .columns(write.Stat("86%", "fewer cold starts"), write.Stat("0", "findings"))
+    .block(write.Quote("It opened in the right font.", "A reviewer"))
 )
 ```
 
