@@ -909,7 +909,11 @@ fn slide_xml<'a>(
             format!("../notesSlides/notesSlide{n}.xml"),
         );
     }
-    let bg = ctx.background_xml(slide.background.as_ref(), &mut rels)?;
+    let bg = match (slide.background.as_ref(), slide.inverted) {
+        (Some(background), _) => ctx.background_xml(Some(background), &mut rels)?,
+        (None, true) => ctx.background_xml(None, &mut rels)?,
+        (None, false) => String::new(),
+    };
     let swapped = ctx.presentation.theme.inverted;
     let mut shapes = String::new();
     let mut next_id = 2u32;

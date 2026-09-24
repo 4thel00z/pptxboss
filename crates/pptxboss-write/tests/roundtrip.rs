@@ -358,6 +358,7 @@ fn themes_and_backgrounds_verify_clean() {
         r#"<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="101010"/></a:gs><a:gs pos="100000"><a:schemeClr val="accent1"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>"#
     ));
     assert!(part("/ppt/slideLayouts/slideLayout2.xml").contains("<a:masterClrMapping/>"));
+    assert!(!part("/ppt/slides/slide1.xml").contains("<p:bg>"));
     let inverted = part("/ppt/slides/slide2.xml");
     assert!(inverted.contains(
         r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>"#
@@ -507,4 +508,23 @@ fn embedded_fonts_are_stored_as_eot_parts() {
         restricted.to_bytes(),
         Err(pptxboss_write::Error::UnsupportedFont(_))
     ));
+}
+
+#[test]
+fn inverted_slides_without_a_background_keep_their_own_fill() {
+    let deck = Presentation::new()
+        .slide(Slide::titled("Plain").bullet("x"))
+        .slide(Slide::titled("Inverted").inverted().bullet("x"));
+    let bytes = deck.to_bytes().unwrap();
+    let report = check_bytes(bytes.clone(), &CheckOptions::default()).unwrap();
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    let doc = Document::load(bytes).unwrap();
+    let package = doc.package().unwrap();
+    let part = |name: &str| String::from_utf8(package.read_part(name).unwrap().to_vec()).unwrap();
+    assert!(!part("/ppt/slides/slide1.xml").contains("<p:bg>"));
+    let inverted = part("/ppt/slides/slide2.xml");
+    assert!(
+        inverted.contains(r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>"#)
+    );
+    assert!(inverted.contains(r#"<a:overrideClrMapping bg1="dk1" tx1="lt1""#));
 }
