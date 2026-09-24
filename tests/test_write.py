@@ -199,3 +199,28 @@ def test_embedded_fonts_are_written_and_restricted_ones_refused() -> None:
     assert b'<p:font typeface="Boxy"' in package.read("/ppt/presentation.xml")
     with pytest.raises(pptxboss.PptxError, match="unsupported font"):
         write.Presentation(theme=write.Theme("x", embed_fonts=[b"<svg/>"])).to_bytes()
+
+
+def test_sections_stats_quotes_and_footers() -> None:
+    theme = write.Theme.preset("nord").footer("Platform review")
+    assert theme.footer_text == "Platform review"
+    assert write.Theme("x", footer="f").footer_text == "f"
+    deck = write.Presentation(theme=theme)
+    deck.add(write.Slide("Deck", subtitle="Subtitle"))
+    deck.add(write.Slide.section("Part one"))
+    deck.add(
+        write.Slide("Numbers")
+        .columns(write.Stat("86%", "fewer cold starts"), write.Stat("0", "findings"))
+        .block(write.Quote("It just opened.", "A reviewer"))
+    )
+    deck.add(write.Slide("Plain", layout="section"))
+    data = deck.to_bytes()
+    assert pptxboss.check(data=data) == []
+    doc = pptxboss.Document(data=data)
+    assert doc.slide_count == 4
+    assert doc[1].text() == "Part one"
+    assert doc[2].text() == "Numbers\n86%\nfewer cold starts\n0\nfindings\nIt just opened.\nA reviewer"
+    assert repr(write.Stat("1", "one")) == 'write.Stat("1", "one")' and repr(write.Quote("q")) == 'write.Quote("q")'
+    assert write.Quote("q").attribution is None and write.Stat("1", "one").label == "one"
+    with pytest.raises(ValueError, match="section"):
+        write.Slide("t", layout="footer")
