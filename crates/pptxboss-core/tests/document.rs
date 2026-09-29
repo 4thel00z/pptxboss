@@ -1,4 +1,5 @@
 use pptxboss_core::document::Located;
+use pptxboss_core::inflate::{deck_limit, MAX_PART_BYTES};
 use pptxboss_core::{Content, Document, Error, MarkdownOptions, TextOptions};
 use pptxboss_testkit::{Deck, DeckSlide, PptDeck, PptSlide, ZipBuilder};
 
@@ -265,6 +266,57 @@ fn interleaved_pieces_are_reassembled_into_one_part() {
         .expect("logical part");
     assert_eq!(part.pieces.len(), 3);
     assert!(package.defects().incomplete_pieces.is_empty());
+}
+
+#[test]
+fn the_pieces_of_a_part_are_held_to_the_part_limit_together() {
+    // No piece passes a limit alone; joined, they pass MAX_PART_BYTES.
+    let piece = vec![b' '; 1 << 20];
+    let pieces = MAX_PART_BYTES / piece.len() + 1;
+    let mut builder = ZipBuilder::new();
+    for (name, bytes) in Deck::new().slide(DeckSlide::titled("One")).parts() {
+        builder = builder.deflated(&name, &bytes);
+    }
+    for number in 0..pieces {
+        let last = if number + 1 == pieces { ".last" } else { "" };
+        let name = format!("ppt/media/big.bin/[{number}]{last}.piece");
+        builder = builder.stored(&name, &piece);
+    }
+    let doc = Document::load(builder.build()).unwrap();
+    let error = doc
+        .package()
+        .expect("a package deck")
+        .read_part_into("/ppt/media/big.bin", &mut Vec::new())
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("pieces pass the inflate limit"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_decks_parts_spend_one_inflate_budget_each_counted_once() {
+    // Each slide stays under the ratio's exemption, but two pass the budget
+    // of a file this size. A part read again, by a fresh document over the
+    // same seed, is not counted again.
+    const SLIDE: usize = 800_000;
+    let text = "a ".repeat(SLIDE / 2);
+    let bytes = Deck::new()
+        .slide(DeckSlide::titled("One").bullet(&text))
+        .slide(DeckSlide::titled("Two").bullet(&text))
+        .build();
+    let limit = deck_limit(bytes.len());
+    assert!(
+        SLIDE + (64 << 10) < limit && limit < 2 * SLIDE,
+        "limit {limit}"
+    );
+    let doc = Document::load(bytes).unwrap();
+    assert!(doc.slide(0).is_ok());
+    assert!(matches!(
+        doc.slide(1),
+        Err(Error::Inflate(message)) if message.contains("inflate limit")
+    ));
+    assert!(Document::from_seed(doc.seed()).slide(0).is_ok());
 }
 
 #[test]

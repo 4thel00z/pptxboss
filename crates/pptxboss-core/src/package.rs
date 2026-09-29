@@ -10,11 +10,13 @@
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::encoding::utf16_xml_to_utf8;
 use crate::error::{Error, Result};
 use crate::hash::FastMap;
+use crate::inflate::{deck_limit, MAX_PART_BYTES};
 use crate::opc::{
     equivalence_key, rels_part_name, validate_part_name, ContentTypes, PartNameError,
     Relationships, CONTENT_TYPES_ITEM,
@@ -69,6 +71,51 @@ struct Shared {
     /// checks are added on first request, since only the verifier reads them.
     base_defects: PackageDefects,
     defects: std::sync::OnceLock<PackageDefects>,
+    /// The inflate budget every package made from this one spends together.
+    budget: Budget,
+}
+
+/// How far a deck's parsed parts have inflated. Each part is counted once
+/// however often it is read, so a package per call or per thread spends one
+/// budget of `deck_limit` between them. Lock-free: a part read again costs
+/// one load, so threads reading one deck never wait on each other.
+struct Budget {
+    limit: usize,
+    spent: AtomicUsize,
+    /// Whether each part, by index, has been counted.
+    counted: Vec<AtomicBool>,
+}
+
+impl Budget {
+    /// The budget of the file behind `archive`, for `parts` parts.
+    fn new(archive: &Archive, parts: usize) -> Self {
+        let file = usize::try_from(archive.source().len()).unwrap_or(usize::MAX);
+        Self {
+            limit: deck_limit(file),
+            spent: AtomicUsize::new(0),
+            counted: (0..parts).map(|_| AtomicBool::new(false)).collect(),
+        }
+    }
+
+    /// Counts `bytes` for part `index`, unless it was counted already. Two
+    /// threads counting one part at once may both see it for a moment, which
+    /// errs on refusing a deck within a part's size of its limit.
+    fn charge(&self, index: usize, bytes: usize) -> Result<()> {
+        if self.counted[index].load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        if self.spent.fetch_add(bytes, Ordering::Relaxed) + bytes > self.limit {
+            self.spent.fetch_sub(bytes, Ordering::Relaxed);
+            return Err(Error::Inflate(format!(
+                "the deck's parts pass its inflate limit of {} bytes",
+                self.limit
+            )));
+        }
+        if self.counted[index].swap(true, Ordering::Relaxed) {
+            self.spent.fetch_sub(bytes, Ordering::Relaxed);
+        }
+        Ok(())
+    }
 }
 
 /// A logical item's display name and its pieces as `(number, is last, entry)`.
@@ -87,7 +134,7 @@ impl ParsedContentTypes {
         if entries.is_empty() {
             return Self::default();
         }
-        match read_entries(archive, entries) {
+        match read_entries(archive, entries, Archive::read_parsed) {
             Err(err) => Self {
                 unreadable: Some(err.to_string()),
                 ..Self::default()
@@ -225,6 +272,7 @@ impl Package {
         }
 
         defects.content_types_missing = content_types_entries.is_empty();
+        let budget = Budget::new(&archive, parts.len());
         let shared = Arc::new(Shared {
             archive,
             parts,
@@ -233,6 +281,7 @@ impl Package {
             content_types: std::sync::OnceLock::new(),
             base_defects: defects,
             defects: std::sync::OnceLock::new(),
+            budget,
         });
         Ok(Self::with_shared(shared))
     }
@@ -315,7 +364,8 @@ impl Package {
         self.content_types().content_type_of(name)
     }
 
-    /// The decompressed bytes of a part, cached for the life of this package.
+    /// The decompressed bytes of a part, cached for the life of this package
+    /// and counted once against the deck's inflate budget.
     pub fn read_part(&self, name: &str) -> Result<Rc<Vec<u8>>> {
         let index = self
             .part_index(name)
@@ -325,7 +375,8 @@ impl Package {
         }
         let part = &self.shared.parts[index];
         let mut bytes = Vec::new();
-        self.read_part_entries(part, &mut bytes)?;
+        self.read_part_entries(part, Archive::read_parsed, &mut bytes)?;
+        self.shared.budget.charge(index, bytes.len())?;
         let data = Rc::new(bytes);
         self.data.borrow_mut().insert(index, Rc::clone(&data));
         Ok(data)
@@ -337,7 +388,7 @@ impl Package {
         let index = self
             .part_index(name)
             .ok_or_else(|| Error::MissingPart(name.to_string()))?;
-        self.read_part_entries(&self.shared.parts[index], out)
+        self.read_part_entries(&self.shared.parts[index], Archive::read, out)
     }
 
     /// The decompressed bytes of a part exactly as stored (pieces
@@ -346,24 +397,25 @@ impl Package {
         let index = self
             .part_index(name)
             .ok_or_else(|| Error::MissingPart(name.to_string()))?;
-        self.read_stored(&self.shared.parts[index], out)
+        self.read_stored(&self.shared.parts[index], Archive::read, out)
     }
 
-    fn read_stored(&self, part: &Part, out: &mut Vec<u8>) -> Result<()> {
+    /// A part's bytes, each entry read with `read`.
+    fn read_stored(&self, part: &Part, read: ReadEntry, out: &mut Vec<u8>) -> Result<()> {
         match part.pieces.is_empty() {
             true => {
                 let entry = &self.shared.archive.entries()[part.entry];
-                self.shared.archive.read(entry, out)
+                read(&self.shared.archive, entry, out)
             }
             false => {
-                *out = read_entries(&self.shared.archive, &part.pieces)?;
+                *out = read_entries(&self.shared.archive, &part.pieces, read)?;
                 Ok(())
             }
         }
     }
 
-    fn read_part_entries(&self, part: &Part, out: &mut Vec<u8>) -> Result<()> {
-        self.read_stored(part, out)?;
+    fn read_part_entries(&self, part: &Part, read: ReadEntry, out: &mut Vec<u8>) -> Result<()> {
+        self.read_stored(part, read, out)?;
         if let Some(utf8) = utf16_xml_to_utf8(out) {
             *out = utf8;
         }
@@ -404,12 +456,22 @@ impl Package {
     }
 }
 
-/// The concatenated decompressed bytes of `entries`, in order.
-fn read_entries(archive: &Archive, entries: &[usize]) -> Result<Vec<u8>> {
+/// How an entry is read: `Archive::read_parsed` for parts parsed as XML,
+/// `Archive::read` for pictures and objects handed out as bytes.
+type ReadEntry = fn(&Archive, &Entry, &mut Vec<u8>) -> Result<()>;
+
+/// The concatenated decompressed bytes of `entries`, in order, held together
+/// to `MAX_PART_BYTES`: the pieces of an interleaved part are one part.
+fn read_entries(archive: &Archive, entries: &[usize], read: ReadEntry) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut piece = Vec::new();
     for &entry in entries {
-        archive.read(&archive.entries()[entry], &mut piece)?;
+        read(archive, &archive.entries()[entry], &mut piece)?;
+        if out.len() + piece.len() > MAX_PART_BYTES {
+            return Err(Error::Inflate(format!(
+                "pieces pass the inflate limit of {MAX_PART_BYTES} bytes"
+            )));
+        }
         out.extend_from_slice(&piece);
     }
     Ok(out)
