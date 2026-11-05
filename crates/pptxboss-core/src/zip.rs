@@ -685,7 +685,8 @@ impl Archive {
         self.read_within(entry, ratio_limit, out)
     }
 
-    fn read_within(
+    /// `read` with the output limit `limit(compressed length)` allows.
+    pub fn read_within(
         &self,
         entry: &Entry,
         limit: impl Fn(usize) -> usize,

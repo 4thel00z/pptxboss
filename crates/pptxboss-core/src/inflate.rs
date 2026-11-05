@@ -37,34 +37,25 @@ const DIST_EXTRA: [u8; 30] = [
 /// DEFLATE expands at most this much (a 258-byte match per 2-bit code),
 /// which bounds the reservation a corrupt size hint can ask for.
 const MAX_RATIO: usize = 1032;
-/// The most one part may inflate to, whatever its stream: a deck is untrusted
-/// input, and a 300 KB file could otherwise expand one part to gigabytes.
+/// The most one part may inflate to.
 pub const MAX_PART_BYTES: usize = 128 << 20;
-/// How far past its compressed size a part may inflate (Apache POI's zip-bomb
-/// ratio): no part of POI's slideshow test decks passes 42x.
+/// How far past its compressed size a parsed part may inflate.
 pub const MAX_INFLATE_RATIO: usize = 100;
-/// Output up to this size is exempt from the ratio: small parts compress
-/// unevenly, and one at a time they cannot exhaust memory. Together they are
-/// held to `deck_limit`.
+/// Output up to this size is exempt from the ratio, and counted in the deck limit.
 pub const RATIO_EXEMPT_BYTES: usize = 1 << 20;
-/// The most a deck's parsed parts may inflate to in all, whatever the size of
-/// the file.
+/// The most a deck's parsed parts may inflate to in all.
 pub const MAX_DECK_BYTES: usize = 512 << 20;
 
-/// The output limit for a part that is parsed as XML: `MAX_INFLATE_RATIO`
-/// times its compressed size, past `RATIO_EXEMPT_BYTES`. Pictures and objects
-/// are not held to it: a flat-colour bitmap inflates past any ratio.
+/// The output limit for a part parsed as XML: `MAX_INFLATE_RATIO` times its
+/// compressed size, within `RATIO_EXEMPT_BYTES` and `MAX_PART_BYTES`.
 pub fn ratio_limit(compressed: usize) -> usize {
     compressed
         .saturating_mul(MAX_INFLATE_RATIO)
         .clamp(RATIO_EXEMPT_BYTES, MAX_PART_BYTES)
 }
 
-/// The output limit for all of a deck's parsed parts together, each counted
-/// once: `MAX_INFLATE_RATIO` times the size of the file, past
-/// `RATIO_EXEMPT_BYTES` and up to `MAX_DECK_BYTES`. Parts exempt from the ratio
-/// one by one still add up: 400 slides just under 1 MiB in a 970 KiB deck,
-/// where POI's decks inflate at most 6.4x in all.
+/// The output limit for all of a deck's parsed parts together: the ratio times
+/// the file size, within `RATIO_EXEMPT_BYTES` and `MAX_DECK_BYTES`.
 pub fn deck_limit(file: usize) -> usize {
     file.saturating_mul(MAX_INFLATE_RATIO)
         .clamp(RATIO_EXEMPT_BYTES, MAX_DECK_BYTES)
@@ -356,27 +347,31 @@ struct Out<'a> {
 }
 
 impl Out<'_> {
-    /// Room for `extra` more bytes; false when the output would pass `limit`.
+    /// Room for `extra` more bytes; false when the buffer cannot hold them
+    /// within the limit.
     #[inline(always)]
     fn ensure(&mut self, extra: usize) -> bool {
         self.at + extra <= self.buf.len() || self.grow(extra)
     }
 
-    /// Grows the buffer for `extra` more bytes, unless the output would pass
-    /// `limit` (give or take the 16 bytes a chunked copy overshoots into).
-    /// Every write comes here once the buffer is full, so the limit holds for
-    /// literals, matches and stored blocks alike, and costs nothing while the
-    /// buffer has room.
+    /// The end of the buffer at its fullest: the limit plus the 16 bytes a
+    /// chunked copy overshoots into.
+    fn ceiling(&self) -> usize {
+        self.base.saturating_add(self.limit).saturating_add(16)
+    }
+
+    /// Grows the buffer for `extra` more bytes, never past `ceiling`. Every
+    /// write comes here once the buffer is full, so the buffer itself holds
+    /// the limit for literals, matches and stored blocks alike, and costs
+    /// nothing while it has room.
     #[cold]
     #[inline(never)]
     fn grow(&mut self, extra: usize) -> bool {
-        let ceiling = self.base.saturating_add(self.limit).saturating_add(16);
+        let ceiling = self.ceiling();
         if self.at + extra > ceiling {
             return false;
         }
-        let grown = (self.buf.len() * 2)
-            .max(self.at + extra + 256)
-            .min(ceiling.saturating_add(256));
+        let grown = (self.buf.len() * 2).max(self.at + extra + 256).min(ceiling);
         self.buf.resize(grown, 0);
         true
     }
@@ -460,15 +455,20 @@ pub fn inflate_within(
 ) -> Result<()> {
     let base = out.len();
     let most = input.len().saturating_mul(MAX_RATIO).saturating_add(64);
-    out.resize(base + expected.min(most).min(limit).max(64) + 64, 0);
     let mut out = Out {
         buf: out,
         base,
         at: base,
         limit,
     };
+    let reserved = (expected.min(most).min(limit).max(64) + 64).min(out.ceiling() - base);
+    out.buf.resize(base + reserved, 0);
     let mut bits = Bits::new(input);
-    let result = inflate_blocks(&mut bits, &mut out);
+    let result =
+        inflate_blocks(&mut bits, &mut out).and_then(|()| match out.at - out.base > limit {
+            true => Err(past_limit(limit)),
+            false => Ok(()),
+        });
     let written = out.at;
     out.buf.truncate(written);
     result
@@ -859,20 +859,24 @@ mod tests {
     /// each: `count` literals in `count` bits, with no match at all.
     fn literal_stream(count: usize) -> Vec<u8> {
         let mut bits = BitWriter::default();
-        bits.put(1, 1); // the final block
-        bits.put(2, 2); // dynamic codes
-        bits.put(0, 5); // 257 literal and length codes
-        bits.put(0, 5); // one distance code
-        bits.put(14, 4); // 18 code length code lengths
+        const FINAL_BLOCK: u64 = 1;
+        const DYNAMIC_CODES: u64 = 2;
+        const MINIMUM_LITERAL_CODES: u64 = 0;
+        const MINIMUM_DISTANCE_CODES: u64 = 0;
+        const CODE_LENGTH_CODES_SENT: u64 = 14;
+        bits.put(FINAL_BLOCK, 1);
+        bits.put(DYNAMIC_CODES, 2);
+        bits.put(MINIMUM_LITERAL_CODES, 5);
+        bits.put(MINIMUM_DISTANCE_CODES, 5);
+        bits.put(CODE_LENGTH_CODES_SENT, 4);
         for symbol in &CODE_LENGTH_ORDER[..18] {
             bits.put(u64::from(*symbol == 1 || *symbol == 18), 3);
         }
-        // Code length symbol 1 is code 0 and symbol 18 (a zero run) code 1.
         bits.zero_lengths(u64::from(b'a'));
         bits.put(0, 1);
         bits.zero_lengths(u64::from(END_OF_BLOCK) - u64::from(b'a') - 1);
-        bits.put(0, 1); // end-of-block
-        bits.put(0, 1); // the distance code
+        bits.put(0, 1);
+        bits.put(0, 1);
         for _ in 0..count {
             bits.put(0, 1);
         }
@@ -890,5 +894,14 @@ mod tests {
         out.clear();
         let error = inflate_within(&stream, 0, 4096, &mut out).unwrap_err();
         assert!(error.to_string().contains("inflate limit"), "{error}");
+    }
+
+    #[test]
+    fn the_limit_is_exact_for_literals() {
+        for (count, limit, accepted) in [(4096, 4096, true), (4097, 4096, false), (8, 4, false)] {
+            let mut out = Vec::new();
+            let result = inflate_within(&literal_stream(count), 0, limit, &mut out);
+            assert_eq!(result.is_ok(), accepted, "{count} literals, limit {limit}");
+        }
     }
 }

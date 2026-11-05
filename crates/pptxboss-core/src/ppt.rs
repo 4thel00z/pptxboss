@@ -1247,7 +1247,8 @@ fn decode_blip(kind: u16, instance: u16, payload: &[u8]) -> Option<LegacyPicture
             0x00 => {
                 let stream = body.get(2..)?;
                 let mut out = Vec::new();
-                crate::inflate::inflate(stream, uncompressed, &mut out).ok()?;
+                let limit = crate::inflate::ratio_limit(stream.len());
+                crate::inflate::inflate_within(stream, uncompressed, limit, &mut out).ok()?;
                 out
             }
             _ => body.to_vec(),

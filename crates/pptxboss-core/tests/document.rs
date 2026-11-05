@@ -320,6 +320,18 @@ fn a_decks_parts_spend_one_inflate_budget_each_counted_once() {
 }
 
 #[test]
+fn a_binary_part_is_held_to_the_part_limit_alone() {
+    let flat = vec![0u8; 8 << 20];
+    let mut builder = ZipBuilder::new();
+    for (name, bytes) in Deck::new().slide(DeckSlide::titled("One")).parts() {
+        builder = builder.deflated(&name, &bytes);
+    }
+    let doc = Document::load(builder.deflated("ppt/media/flat.bin", &flat).build()).unwrap();
+    let package = doc.package().expect("a package deck");
+    assert_eq!(*package.read_part("/ppt/media/flat.bin").unwrap(), flat);
+}
+
+#[test]
 fn a_utf16_slide_part_reads_like_utf8() {
     let deck = Deck::new().slide(DeckSlide::titled("Wide chars").bullet("ünïcödé"));
     let expected = Document::load(deck.build()).unwrap().text();
