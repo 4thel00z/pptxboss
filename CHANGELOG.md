@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.0](https://github.com/4thel00z/pptxboss/compare/v2.2.0...v2.3.0) (2026-11-05)
+
+
+### Features
+
+* **core:** bound inflation per part and per deck ([#19](https://github.com/4thel00z/pptxboss/issues/19)) ([85e5f79](https://github.com/4thel00z/pptxboss/commit/85e5f79f4bd9d70a8b95691d999496843abfd206))
+* **write:** section slides, stats, quotes and a footer band ([#18](https://github.com/4thel00z/pptxboss/issues/18)) ([f38ccea](https://github.com/4thel00z/pptxboss/commit/f38cceaf2b2948714a0ef946b93229559080584a))
+
 ## [2.2.0](https://github.com/4thel00z/pptxboss/compare/v2.1.0...v2.2.0) (2026-09-23)
 
 
