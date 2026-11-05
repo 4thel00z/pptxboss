@@ -297,7 +297,7 @@ pub fn run(ctx: &Context<'_>, sink: &mut Sink<'_>) {
                 let Some(entry) = archive.get(index) else {
                     continue;
                 };
-                if let Err(err) = archive.read(entry, &mut data) {
+                if let Err(err) = archive.read_parsed(entry, &mut data) {
                     sink.push(
                         Finding::new(&ZIP008, format!("part could not be read: {err}"))
                             .in_part(&part.name),

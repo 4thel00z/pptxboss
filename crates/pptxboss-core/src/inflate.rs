@@ -37,6 +37,29 @@ const DIST_EXTRA: [u8; 30] = [
 /// DEFLATE expands at most this much (a 258-byte match per 2-bit code),
 /// which bounds the reservation a corrupt size hint can ask for.
 const MAX_RATIO: usize = 1032;
+/// The most one part may inflate to.
+pub const MAX_PART_BYTES: usize = 128 << 20;
+/// How far past its compressed size a parsed part may inflate.
+pub const MAX_INFLATE_RATIO: usize = 100;
+/// Output up to this size is exempt from the ratio, and counted in the deck limit.
+pub const RATIO_EXEMPT_BYTES: usize = 1 << 20;
+/// The most a deck's parsed parts may inflate to in all.
+pub const MAX_DECK_BYTES: usize = 512 << 20;
+
+/// The output limit for a part parsed as XML: `MAX_INFLATE_RATIO` times its
+/// compressed size, within `RATIO_EXEMPT_BYTES` and `MAX_PART_BYTES`.
+pub fn ratio_limit(compressed: usize) -> usize {
+    compressed
+        .saturating_mul(MAX_INFLATE_RATIO)
+        .clamp(RATIO_EXEMPT_BYTES, MAX_PART_BYTES)
+}
+
+/// The output limit for all of a deck's parsed parts together: the ratio times
+/// the file size, within `RATIO_EXEMPT_BYTES` and `MAX_DECK_BYTES`.
+pub fn deck_limit(file: usize) -> usize {
+    file.saturating_mul(MAX_INFLATE_RATIO)
+        .clamp(RATIO_EXEMPT_BYTES, MAX_DECK_BYTES)
+}
 /// The order in which code length code lengths are transmitted (3.2.7).
 const CODE_LENGTH_ORDER: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
@@ -48,6 +71,10 @@ fn truncated() -> Error {
 
 fn invalid(msg: &str) -> Error {
     Error::Inflate(msg.into())
+}
+
+fn past_limit(limit: usize) -> Error {
+    Error::Inflate(format!("output passes the inflate limit of {limit} bytes"))
 }
 
 /// A little-endian bit reader over the whole input. Failures are recorded
@@ -315,34 +342,60 @@ struct Out<'a> {
     base: usize,
     /// Next byte to write.
     at: usize,
+    /// The most this stream may write.
+    limit: usize,
 }
 
 impl Out<'_> {
+    /// Room for `extra` more bytes; false when the buffer cannot hold them
+    /// within the limit.
     #[inline(always)]
-    fn ensure(&mut self, extra: usize) {
-        if self.at + extra > self.buf.len() {
-            let grown = (self.buf.len() * 2).max(self.at + extra + 256);
-            self.buf.resize(grown, 0);
-        }
+    fn ensure(&mut self, extra: usize) -> bool {
+        self.at + extra <= self.buf.len() || self.grow(extra)
     }
 
-    #[inline(always)]
-    fn literal(&mut self, byte: u8) {
-        self.ensure(1);
-        self.buf[self.at] = byte;
-        self.at += 1;
+    /// The end of the buffer at its fullest: the limit plus the 16 bytes a
+    /// chunked copy overshoots into.
+    fn ceiling(&self) -> usize {
+        self.base.saturating_add(self.limit).saturating_add(16)
     }
 
-    /// Appends `length` bytes copied from `distance` bytes back; false when
-    /// the distance reaches before this stream's output. Copies run in 16-
-    /// or 8-byte chunks that may overshoot `length`; the overshoot lands in
-    /// slack that later output overwrites.
-    #[inline(always)]
-    fn copy_match(&mut self, distance: usize, length: usize) -> bool {
-        if distance > self.at - self.base {
+    /// Grows the buffer for `extra` more bytes, never past `ceiling`. Every
+    /// write comes here once the buffer is full, so the buffer itself holds
+    /// the limit for literals, matches and stored blocks alike, and costs
+    /// nothing while it has room.
+    #[cold]
+    #[inline(never)]
+    fn grow(&mut self, extra: usize) -> bool {
+        let ceiling = self.ceiling();
+        if self.at + extra > ceiling {
             return false;
         }
-        self.ensure(length + 16);
+        let grown = (self.buf.len() * 2).max(self.at + extra + 256).min(ceiling);
+        self.buf.resize(grown, 0);
+        true
+    }
+
+    /// Appends `byte`; false when that passes the limit.
+    #[inline(always)]
+    fn literal(&mut self, byte: u8) -> bool {
+        if !self.ensure(1) {
+            return false;
+        }
+        self.buf[self.at] = byte;
+        self.at += 1;
+        true
+    }
+
+    /// Appends `length` bytes copied from `distance` bytes back, a distance
+    /// the caller has checked; false when that passes the limit. Copies run
+    /// in 16- or 8-byte chunks that may overshoot `length`; the overshoot
+    /// lands in slack that later output overwrites.
+    #[inline(always)]
+    fn copy_match(&mut self, distance: usize, length: usize) -> bool {
+        if !self.ensure(length + 16) {
+            return false;
+        }
         let start = self.at - distance;
         if distance >= 16 {
             let mut offset = 0;
@@ -386,18 +439,36 @@ impl Out<'_> {
 }
 
 /// Inflates a raw DEFLATE stream into `out` (appended); `expected` sizes the
-/// reservation. Trailing bytes after the final block are ignored.
+/// reservation. Trailing bytes after the final block are ignored. The output
+/// is held to `MAX_PART_BYTES` by what the stream actually produces, never by
+/// a declared size.
 pub fn inflate(input: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<()> {
+    inflate_within(input, expected, MAX_PART_BYTES, out)
+}
+
+/// `inflate` held to `limit` output bytes.
+pub fn inflate_within(
+    input: &[u8],
+    expected: usize,
+    limit: usize,
+    out: &mut Vec<u8>,
+) -> Result<()> {
     let base = out.len();
     let most = input.len().saturating_mul(MAX_RATIO).saturating_add(64);
-    out.resize(base + expected.min(most).max(64) + 64, 0);
     let mut out = Out {
         buf: out,
         base,
         at: base,
+        limit,
     };
+    let reserved = (expected.min(most).min(limit).max(64) + 64).min(out.ceiling() - base);
+    out.buf.resize(base + reserved, 0);
     let mut bits = Bits::new(input);
-    let result = inflate_blocks(&mut bits, &mut out);
+    let result =
+        inflate_blocks(&mut bits, &mut out).and_then(|()| match out.at - out.base > limit {
+            true => Err(past_limit(limit)),
+            false => Ok(()),
+        });
     let written = out.at;
     out.buf.truncate(written);
     result
@@ -445,7 +516,9 @@ fn stored_block(bits: &mut Bits<'_>, out: &mut Out<'_>) -> Result<()> {
     if end > data.len() {
         return Err(truncated());
     }
-    out.ensure(len);
+    if !out.ensure(len) {
+        return Err(past_limit(out.limit));
+    }
     out.buf[out.at..out.at + len].copy_from_slice(&data[start..end]);
     out.at += len;
     bits.pos = end;
@@ -524,7 +597,9 @@ fn decode_block(
         }
         let symbol = literals.decode(bits);
         if symbol < END_OF_BLOCK {
-            out.literal(symbol as u8);
+            if !out.literal(symbol as u8) {
+                return Err(past_limit(out.limit));
+            }
             continue;
         }
         if symbol == END_OF_BLOCK {
@@ -545,8 +620,11 @@ fn decode_block(
         let distance =
             usize::from(DIST_BASE[distance_code]) + bits.take(u32::from(DIST_EXTRA[distance_code]));
         bits.check()?;
-        if !out.copy_match(distance, length) {
+        if distance > out.at - out.base {
             return Err(invalid("distance reaches before the start of output"));
+        }
+        if !out.copy_match(distance, length) {
+            return Err(past_limit(out.limit));
         }
     }
 }
@@ -642,9 +720,10 @@ mod tests {
             buf: &mut vec![0u8; 64],
             base: 0,
             at: 0,
+            limit: usize::MAX,
         };
         for byte in b"abcdefghijklm" {
-            out.literal(*byte);
+            assert!(out.literal(*byte));
         }
         assert!(out.copy_match(10, 12));
         assert_eq!(&out.buf[..25], b"abcdefghijklmdefghijklmde");
@@ -710,5 +789,119 @@ mod tests {
         assert!(code.build(&[1, 1, 1], DISTANCE_BITS).is_err());
         assert!(code.build(&[1, 1], DISTANCE_BITS).is_ok());
         assert!(code.build(&[1], DISTANCE_BITS).is_ok());
+    }
+
+    #[test]
+    fn a_stream_inflating_past_the_ratio_is_refused() {
+        // 32 MiB of zeros deflates about 1000:1, far past any real part.
+        let stream = deflate(&vec![0u8; 32 << 20], Compression::default());
+        let mut out = Vec::new();
+        let error = inflate_within(&stream, 0, ratio_limit(stream.len()), &mut out).unwrap_err();
+        assert!(error.to_string().contains("inflate limit"), "{error}");
+    }
+
+    #[test]
+    fn a_stream_inflating_past_the_part_limit_is_refused() {
+        let stream = deflate(&noise(4096, 7).repeat(64), Compression::default());
+        let mut out = Vec::new();
+        let error = inflate_within(&stream, 0, 4096, &mut out).unwrap_err();
+        assert!(error.to_string().contains("inflate limit"), "{error}");
+    }
+
+    #[test]
+    fn a_small_part_is_exempt_from_the_ratio() {
+        // 512 KiB of zeros inflates well past the ratio but under the exemption.
+        let stream = deflate(&vec![0u8; 512 << 10], Compression::default());
+        let mut out = Vec::new();
+        inflate_within(&stream, 0, ratio_limit(stream.len()), &mut out).unwrap();
+        assert_eq!(out, vec![0u8; 512 << 10]);
+    }
+
+    /// Bits written least significant first, as DEFLATE reads them.
+    #[derive(Default)]
+    struct BitWriter {
+        bytes: Vec<u8>,
+        pending: u64,
+        used: u32,
+    }
+
+    impl BitWriter {
+        fn put(&mut self, value: u64, width: u32) {
+            self.pending |= value << self.used;
+            self.used += width;
+            while self.used >= 8 {
+                self.bytes.push(self.pending as u8);
+                self.pending >>= 8;
+                self.used -= 8;
+            }
+        }
+
+        /// A run of `count` zero code lengths, as code length symbols 18
+        /// (runs of 11 to 138).
+        fn zero_lengths(&mut self, mut count: u64) {
+            while count > 0 {
+                let run = count.min(138);
+                self.put(1, 1);
+                self.put(run - 11, 7);
+                count -= run;
+            }
+        }
+
+        fn finish(mut self) -> Vec<u8> {
+            if self.used > 0 {
+                self.bytes.push(self.pending as u8);
+            }
+            self.bytes
+        }
+    }
+
+    /// One dynamic block whose only codes are `a` and end-of-block, one bit
+    /// each: `count` literals in `count` bits, with no match at all.
+    fn literal_stream(count: usize) -> Vec<u8> {
+        let mut bits = BitWriter::default();
+        const FINAL_BLOCK: u64 = 1;
+        const DYNAMIC_CODES: u64 = 2;
+        const MINIMUM_LITERAL_CODES: u64 = 0;
+        const MINIMUM_DISTANCE_CODES: u64 = 0;
+        const CODE_LENGTH_CODES_SENT: u64 = 14;
+        bits.put(FINAL_BLOCK, 1);
+        bits.put(DYNAMIC_CODES, 2);
+        bits.put(MINIMUM_LITERAL_CODES, 5);
+        bits.put(MINIMUM_DISTANCE_CODES, 5);
+        bits.put(CODE_LENGTH_CODES_SENT, 4);
+        for symbol in &CODE_LENGTH_ORDER[..18] {
+            bits.put(u64::from(*symbol == 1 || *symbol == 18), 3);
+        }
+        bits.zero_lengths(u64::from(b'a'));
+        bits.put(0, 1);
+        bits.zero_lengths(u64::from(END_OF_BLOCK) - u64::from(b'a') - 1);
+        bits.put(0, 1);
+        bits.put(0, 1);
+        for _ in 0..count {
+            bits.put(0, 1);
+        }
+        bits.put(1, 1);
+        bits.finish()
+    }
+
+    #[test]
+    fn a_stream_of_literals_alone_is_held_to_the_limit() {
+        // One-bit literal codes inflate 8x without a single match.
+        let stream = literal_stream(1 << 16);
+        let mut out = Vec::new();
+        inflate_within(&stream, 0, usize::MAX, &mut out).unwrap();
+        assert_eq!(out, vec![b'a'; 1 << 16]);
+        out.clear();
+        let error = inflate_within(&stream, 0, 4096, &mut out).unwrap_err();
+        assert!(error.to_string().contains("inflate limit"), "{error}");
+    }
+
+    #[test]
+    fn the_limit_is_exact_for_literals() {
+        for (count, limit, accepted) in [(4096, 4096, true), (4097, 4096, false), (8, 4, false)] {
+            let mut out = Vec::new();
+            let result = inflate_within(&literal_stream(count), 0, limit, &mut out);
+            assert_eq!(result.is_ok(), accepted, "{count} literals, limit {limit}");
+        }
     }
 }

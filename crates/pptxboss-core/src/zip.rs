@@ -23,6 +23,7 @@ use memchr::memmem;
 use crate::crc32::crc32;
 use crate::error::{Error, Result};
 use crate::hash::FastMap;
+use crate::inflate::{ratio_limit, MAX_PART_BYTES};
 
 const LOCAL_HEADER_SIG: [u8; 4] = 0x0403_4b50u32.to_le_bytes();
 const CENTRAL_HEADER_SIG: [u8; 4] = 0x0201_4b50u32.to_le_bytes();
@@ -675,6 +676,22 @@ impl Archive {
 
     /// Reads and decompresses `entry` into `out` (cleared first).
     pub fn read(&self, entry: &Entry, out: &mut Vec<u8>) -> Result<()> {
+        self.read_within(entry, |_| MAX_PART_BYTES, out)
+    }
+
+    /// `read` for a part that is parsed as XML, held to `ratio_limit` of its
+    /// compressed size as well.
+    pub fn read_parsed(&self, entry: &Entry, out: &mut Vec<u8>) -> Result<()> {
+        self.read_within(entry, ratio_limit, out)
+    }
+
+    /// `read` with the output limit `limit(compressed length)` allows.
+    pub fn read_within(
+        &self,
+        entry: &Entry,
+        limit: impl Fn(usize) -> usize,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         if entry.is_encrypted() {
             return Err(Error::Unsupported(format!(
                 "encrypted zip entry {}",
@@ -688,7 +705,7 @@ impl Archive {
                 let raw = self.raw_slice(entry, &mut scratch)?;
                 out.clear();
                 let expected = usize::try_from(entry.uncompressed_size).unwrap_or(0);
-                inflate(raw, expected, out)
+                crate::inflate::inflate_within(raw, expected, limit(raw.len()), out)
             }),
             other => Err(Error::Unsupported(format!(
                 "zip compression method {other} for {}",
