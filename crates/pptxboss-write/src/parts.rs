@@ -4,11 +4,14 @@
 use crate::fonts::{self, FontInfo};
 use crate::layout::{self, Element, Grid, Planned};
 use crate::style::{
-    bg_xml, body_levels_xml, clr_map_attrs, clr_map_ovr, ppr_xml, run_xml, theme_xml,
+    bg_xml, body_levels_xml, clr_map_attrs, clr_map_ovr, color_xml, ppr_xml, run_xml, theme_xml,
     ParagraphMode, NS_A,
 };
 use crate::xml::{attr, text, DECL};
-use crate::{Background, Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result, Shape};
+use crate::{
+    Background, Color, Error, ImageFormat, Layout, Paragraph, Presentation, Rect, Result,
+    SchemeColor, Shape,
+};
 
 const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -185,12 +188,7 @@ pub fn build(presentation: &Presentation) -> Result<Vec<PartOut>> {
         "ppt/slideMasters/_rels/slideMaster1.xml.rels",
         &master_rels,
     ));
-    for layout in [
-        Layout::Title,
-        Layout::TitleAndContent,
-        Layout::TitleOnly,
-        Layout::Blank,
-    ] {
+    for layout in Layout::ALL {
         let index = layout.index();
         let (xml, layout_rels) = layout_xml(&mut ctx, layout, &grid)?;
         push_xml(
@@ -557,10 +555,58 @@ fn prompt(text_value: &str) -> String {
     )
 }
 
+/// The background a section layout takes unless the theme gives it one.
+static SECTION_BACKGROUND: Background = Background::Solid(Color::Scheme(SchemeColor::Accent1));
+
+const FOOTER_PH: &str = r#"<p:ph type="ftr" sz="quarter" idx="11"/>"#;
+const SLIDE_NUMBER_PH: &str = r#"<p:ph type="sldNum" sz="quarter" idx="12"/>"#;
+/// The field id every slide number shares; PowerPoint accepts any GUID.
+const SLIDE_NUMBER_FIELD: &str = "{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}";
+
+/// The body and list style of a footer placeholder: twelve points in a
+/// tint of the text color, aligned `algn`.
+fn footer_body_pr(algn: &str) -> String {
+    format!(
+        r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"/><a:lstStyle><a:lvl1pPr algn="{algn}"><a:defRPr sz="1200"><a:solidFill><a:schemeClr val="tx1"><a:tint val="75000"/></a:schemeClr></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#
+    )
+}
+
+/// A paragraph holding the slide number field with `shown` as its text.
+fn slide_number_paragraph(shown: &str) -> String {
+    format!(
+        r#"<a:p><a:fld id="{SLIDE_NUMBER_FIELD}" type="slidenum"><a:rPr lang="en-US"/><a:t>{}</a:t></a:fld><a:endParaRPr lang="en-US"/></a:p>"#,
+        text(shown)
+    )
+}
+
+/// The footer and slide number placeholders of a layout, inheriting the
+/// master's positions.
+fn layout_footer_xml() -> String {
+    format!(
+        "{}{}",
+        placeholder_sp(
+            4,
+            "Footer Placeholder 3",
+            FOOTER_PH,
+            None,
+            PLAIN_BODY_PR,
+            &prompt("Footer")
+        ),
+        placeholder_sp(
+            5,
+            "Slide Number Placeholder 4",
+            SLIDE_NUMBER_PH,
+            None,
+            PLAIN_BODY_PR,
+            &slide_number_paragraph("‹#›")
+        )
+    )
+}
+
 fn master_xml<'a>(ctx: &mut Ctx<'a>, grid: &Grid) -> Result<(String, Vec<Rel>)> {
     let theme = &ctx.presentation.theme;
     let mut rels = Rels::new();
-    for i in 1..=4 {
+    for i in 1..=Layout::ALL.len() {
         rels.add(
             &format!("{REL}slideLayout"),
             format!("../slideLayouts/slideLayout{i}.xml"),
@@ -574,11 +620,29 @@ fn master_xml<'a>(ctx: &mut Ctx<'a>, grid: &Grid) -> Result<(String, Vec<Rel>)> 
     );
     xml.push_str(&placeholder_sp(2, "Title Placeholder 1", r#"<p:ph type="title"/>"#, Some(grid.title), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master title style")));
     xml.push_str(&placeholder_sp(3, "Text Placeholder 2", r#"<p:ph type="body" idx="1"/>"#, Some(grid.body), r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>"#, &prompt("Click to edit Master text styles")));
+    if theme.footer.is_some() {
+        xml.push_str(&placeholder_sp(
+            4,
+            "Footer Placeholder 3",
+            FOOTER_PH,
+            Some(grid.footer),
+            &footer_body_pr("l"),
+            &prompt("Footer"),
+        ));
+        xml.push_str(&placeholder_sp(
+            5,
+            "Slide Number Placeholder 4",
+            SLIDE_NUMBER_PH,
+            Some(grid.slide_number),
+            &footer_body_pr("r"),
+            &slide_number_paragraph("‹#›"),
+        ));
+    }
     xml.push_str(&format!(
         "</p:spTree></p:cSld><p:clrMap {}/><p:sldLayoutIdLst>",
         clr_map_attrs(false)
     ));
-    for i in 1..=4u32 {
+    for i in 1..=Layout::ALL.len() as u32 {
         xml.push_str(&format!(
             r#"<p:sldLayoutId id="{}" r:id="rId{i}"/>"#,
             2_147_483_648u32 + i
@@ -604,11 +668,25 @@ fn layout_xml<'a>(ctx: &mut Ctx<'a>, layout: Layout, grid: &Grid) -> Result<(Str
         "../slideMasters/slideMaster1.xml".to_string(),
     );
     let entry = theme.layout_background_for(layout);
-    let bg = match entry {
-        Some(entry) => ctx.background_xml(Some(&entry.background), &mut rels)?,
+    let background = match (entry, layout) {
+        (Some(entry), _) => Some(&entry.background),
+        (None, Layout::Section) => Some(&SECTION_BACKGROUND),
+        (None, _) => None,
+    };
+    let bg = match background {
+        Some(background) => ctx.background_xml(Some(background), &mut rels)?,
         None => String::new(),
     };
-    let ovr = clr_map_ovr(entry.is_some_and(|entry| entry.inverted));
+    let inverted = match (entry, layout) {
+        (Some(entry), _) => entry.inverted,
+        (None, Layout::Section) => true,
+        (None, _) => false,
+    };
+    let ovr = clr_map_ovr(inverted);
+    let footer = match theme.footer.is_some() && layout.has_footer() {
+        true => layout_footer_xml(),
+        false => String::new(),
+    };
     let (kind, name, shapes) = match layout {
         Layout::Title => (
             "title",
@@ -673,11 +751,25 @@ fn layout_xml<'a>(ctx: &mut Ctx<'a>, layout: Layout, grid: &Grid) -> Result<(Str
             ),
         ),
         Layout::Blank => ("blank", "Blank", String::new()),
+        Layout::Section => (
+            "secHead",
+            "Section Header",
+            placeholder_sp(
+                2,
+                "Title 1",
+                r#"<p:ph type="title"/>"#,
+                Some(grid.center_title),
+                &format!(
+                    r#"<a:bodyPr anchor="b"/><a:lstStyle><a:lvl1pPr algn="l"><a:defRPr sz="{display}"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#
+                ),
+                &prompt("Click to edit Master title style"),
+            ),
+        ),
         #[allow(unreachable_patterns)]
         _ => ("blank", "Blank", String::new()),
     };
     let xml = format!(
-        r#"{DECL}<p:sldLayout xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" type="{kind}" preserve="1"><p:cSld name="{name}">{bg}<p:spTree>{}{shapes}</p:spTree></p:cSld>{ovr}</p:sldLayout>"#,
+        r#"{DECL}<p:sldLayout xmlns:a="{NS_A}" xmlns:r="{NS_R}" xmlns:p="{NS_P}" type="{kind}" preserve="1"><p:cSld name="{name}">{bg}<p:spTree>{}{shapes}{footer}</p:spTree></p:cSld>{ovr}</p:sldLayout>"#,
         group_header()
     );
     Ok((xml, rels.list))
@@ -909,7 +1001,11 @@ fn slide_xml<'a>(
             format!("../notesSlides/notesSlide{n}.xml"),
         );
     }
-    let bg = ctx.background_xml(slide.background.as_ref(), &mut rels)?;
+    let bg = match (slide.background.as_ref(), slide.inverted) {
+        (Some(background), _) => ctx.background_xml(Some(background), &mut rels)?,
+        (None, true) => ctx.background_xml(None, &mut rels)?,
+        (None, false) => String::new(),
+    };
     let swapped = ctx.presentation.theme.inverted;
     let mut shapes = String::new();
     let mut next_id = 2u32;
@@ -939,7 +1035,7 @@ fn slide_xml<'a>(
             r#"<p:ph type="subTitle" idx="1"/>"#,
             None,
             PLAIN_BODY_PR,
-            &plain_paragraph(subtitle, None),
+            &plain_paragraph(subtitle, planned.subtitle_size),
         ));
         next_id += 1;
     }
@@ -1007,6 +1103,15 @@ fn slide_xml<'a>(
                 )?);
                 next_id += 1;
             }
+            Element::Bar { rect, color } => {
+                shapes.push_str(&format!(
+                    r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="Bar {}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill>{}</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>"#,
+                    next_id - 1,
+                    xfrm(*rect),
+                    color_xml(*color, swapped)
+                ));
+                next_id += 1;
+            }
             Element::Shape(Shape::Text { paragraphs, rect }) => {
                 shapes.push_str(&format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{next_id}" name="TextBox {}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:spAutoFit/></a:bodyPr><a:lstStyle/>{}</p:txBody></p:sp>"#, next_id - 1, xfrm(*rect), paragraphs_xml(paragraphs, ParagraphMode::Box, &mut rels, swapped)));
                 next_id += 1;
@@ -1035,6 +1140,31 @@ fn slide_xml<'a>(
                 next_id += 1;
             }
         }
+    }
+    if let Some(footer) = ctx
+        .presentation
+        .theme
+        .footer
+        .as_deref()
+        .filter(|_| layout.has_footer())
+    {
+        shapes.push_str(&placeholder_sp(
+            next_id,
+            &format!("Footer Placeholder {}", next_id - 1),
+            FOOTER_PH,
+            None,
+            PLAIN_BODY_PR,
+            &plain_paragraph(footer, None),
+        ));
+        next_id += 1;
+        shapes.push_str(&placeholder_sp(
+            next_id,
+            &format!("Slide Number Placeholder {}", next_id - 1),
+            SLIDE_NUMBER_PH,
+            None,
+            PLAIN_BODY_PR,
+            &slide_number_paragraph(&n.to_string()),
+        ));
     }
     let show = match slide.hidden {
         true => r#" show="0""#,
