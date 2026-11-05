@@ -532,7 +532,7 @@ class write:
         def picture(data: bytes) -> write.Background: ...
 
     class Theme:
-        """Colors, fonts, type scale, backgrounds and embedded fonts shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB; sizes maps display, title, subtitle, body, table and minimum to points; embed_fonts holds TrueType or OpenType files stored in the deck."""
+        """Colors, fonts, type scale, backgrounds, embedded fonts and the footer shared by every slide; colors maps slot names (dark1, light1, dark2, light2, accent1 to accent6, hyperlink, followed_hyperlink) to #RRGGBB; sizes maps display, title, subtitle, body, table and minimum to points; embed_fonts holds TrueType or OpenType files stored in the deck; footer is the text of a footer band shown with the slide number on every slide outside the title and section layouts."""
 
         def __init__(
             self,
@@ -546,6 +546,7 @@ class write:
             inverted: bool = False,
             background: write.Background | None = None,
             embed_fonts: list[bytes] | None = None,
+            footer: str | None = None,
         ) -> None: ...
         @staticmethod
         def preset(name: str) -> write.Theme:
@@ -555,6 +556,10 @@ class write:
         def layout_background(self, layout: str, background: write.Background, *, inverted: bool = False) -> write.Theme: ...
         def embed_font(self, data: bytes) -> write.Theme:
             """Stores a TrueType or OpenType font file in the deck; saving fails for a font whose license forbids embedding."""
+        def footer(self, text: str) -> write.Theme:
+            """Shows a footer band with text and the slide number on every slide outside the title and section layouts."""
+        @property
+        def footer_text(self) -> str | None: ...
         @property
         def embedded_font_count(self) -> int: ...
         @property
@@ -586,8 +591,26 @@ class write:
         @property
         def header(self) -> bool: ...
 
-    Block = list[str | write.Paragraph] | write.Picture | write.Table | list["write.Block"]
-    """A block for the layout engine: lines of text (strings become bullets), a Picture, a Table, or a list of blocks side by side."""
+    class Stat:
+        """A figure at display size in the first accent color over a short label; several side by side make a row of key numbers."""
+
+        def __init__(self, value: str, label: str) -> None: ...
+        @property
+        def value(self) -> str: ...
+        @property
+        def label(self) -> str: ...
+
+    class Quote:
+        """A pull quote: italic text beside a rule in the first accent color, with an optional attribution below."""
+
+        def __init__(self, text: str, attribution: str | None = None) -> None: ...
+        @property
+        def text(self) -> str: ...
+        @property
+        def attribution(self) -> str | None: ...
+
+    Block = list[str | write.Paragraph] | write.Picture | write.Table | write.Stat | write.Quote | list["write.Block"]
+    """A block for the layout engine: lines of text (strings become bullets), a Picture, a Table, a Stat, a Quote, or a list of blocks side by side."""
 
     class Slide:
         """One slide under construction; coordinates are inches, and content given without them is placed by the layout engine."""
@@ -603,6 +626,9 @@ class write:
             background: write.Background | None = None,
             inverted: bool = False,
         ) -> None: ...
+        @staticmethod
+        def section(title: str) -> write.Slide:
+            """A section divider: the title alone on the section layout, which fills the slide with the first accent color."""
         def bullet(self, text: str | list[str | write.Run], level: int = 0, *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...
         def paragraph(self, text: str | list[str | write.Run], *, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None, align: str = "left") -> write.Slide: ...
         def text_box(self, x: float, y: float, w: float, h: float, lines: list[str | write.Paragraph], *, bullets: bool = False, bold: bool = False, italic: bool = False, size: int | None = None, color: str | None = None) -> write.Slide: ...

@@ -1,7 +1,8 @@
 //! A deck laid out by the engine: a full agenda that shrinks, a list that
 //! continues on a second slide, text beside a picture, a long table that
-//! carries its header over, and stacked blocks. Run with
-//! `cargo run --example placed -- placed.pptx [picture.png]`.
+//! carries its header over, stacked blocks, a section divider, a row of
+//! key numbers with a pull quote, and a footer band on every content
+//! slide. Run with `cargo run --example placed -- placed.pptx [picture.png]`.
 
 use pptxboss_write::{Block, Paragraph, Presentation, Slide, Theme};
 
@@ -61,11 +62,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let deck = Presentation::new()
-        .theme(Theme::nord())
+        .theme(Theme::nord().footer("Layout without coordinates"))
         .slide(Slide::title_slide(
             "Layout without coordinates",
             Some("blocks, columns, fitting and continuation"),
         ))
+        .slide(Slide::section("Fitting"))
         .slide(agenda)
         .slide(list)
         .slide(
@@ -81,6 +83,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .notes("Columns split seven to five when one side is a picture."),
         )
         .slide(Slide::titled("Decks verified this week").block(Block::table(rows, true)))
+        .slide(Slide::section("The numbers"))
+        .slide(
+            Slide::titled("What changed")
+                .columns(vec![
+                    Block::stat("86%", "fewer cold starts"),
+                    Block::stat("1,240", "decks verified"),
+                    Block::stat("0", "findings"),
+                ])
+                .block(Block::quote(
+                    "The deck opened in the right font on a machine that had never seen it.",
+                    Some("A reviewer, September 2026"),
+                )),
+        )
         .slide(
             Slide::titled("Stacked blocks")
                 .paragraph("A paragraph, then a table, then whatever room is left.")
