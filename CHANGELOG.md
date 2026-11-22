@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.1](https://github.com/4thel00z/pptxboss/compare/v2.3.0...v2.3.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **core:** return an error for a truncated compound file ([#21](https://github.com/4thel00z/pptxboss/issues/21)) ([5fdfd1a](https://github.com/4thel00z/pptxboss/commit/5fdfd1ad7e40dde3780ed3df2a86f5ad7b0a0b96))
+
 ## [2.3.0](https://github.com/4thel00z/pptxboss/compare/v2.2.0...v2.3.0) (2026-11-05)
 
 
