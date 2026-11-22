@@ -21,8 +21,6 @@ const HEADER_DIFAT_ENTRIES: usize = 109;
 const DIRECTORY_ENTRY_LEN: usize = 128;
 const MINI_SECTOR_LEN: usize = 64;
 const DEFAULT_MINI_CUTOFF: u64 = 4096;
-/// Iteration cap for every chain walk, well above any real file's sector count.
-const MAX_CHAIN: usize = 1 << 24;
 
 /// Whether `bytes` start with the compound file signature.
 pub fn is_compound(bytes: &[u8]) -> bool {
@@ -75,11 +73,13 @@ impl Compound {
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        if data.len() < HEADER_LEN || !is_compound(&data) {
+        let Some(header) = data.first_chunk::<HEADER_LEN>().filter(|h| is_compound(*h)) else {
             return Err(cfb("missing compound file signature"));
-        }
-        let major = u16_at(&data, 0x1a);
-        let sector_shift = u16_at(&data, 0x1e);
+        };
+        let read_u16 = |offset| u16_at(header, offset).ok_or_else(|| cfb("truncated header"));
+        let read_u32 = |offset| u32_at(header, offset).ok_or_else(|| cfb("truncated header"));
+        let major = read_u16(0x1a)?;
+        let sector_shift = read_u16(0x1e)?;
         if !matches!(major, 3 | 4) {
             return Err(cfb(&format!("unsupported major version {major}")));
         }
@@ -90,58 +90,83 @@ impl Compound {
         if data.len() < sector_len * 3 {
             return Err(cfb("file shorter than three sectors"));
         }
-        let fat_sector_count = u32_at(&data, 0x2c) as usize;
-        let first_directory = u32_at(&data, 0x30);
-        let mut mini_cutoff = u64::from(u32_at(&data, 0x38));
+        let fat_sector_count = read_u32(0x2c)? as usize;
+        let first_directory = read_u32(0x30)?;
+        let mut mini_cutoff = u64::from(read_u32(0x38)?);
         if mini_cutoff == 0 {
             mini_cutoff = DEFAULT_MINI_CUTOFF;
         }
-        let first_mini_fat = u32_at(&data, 0x3c);
-        let mini_fat_count = u32_at(&data, 0x40) as usize;
-        let first_difat = u32_at(&data, 0x44);
-        let difat_count = u32_at(&data, 0x48) as usize;
+        let first_mini_fat = read_u32(0x3c)?;
+        let mini_fat_count = read_u32(0x40)? as usize;
+        let first_difat = read_u32(0x44)?;
+        let difat_count = read_u32(0x48)? as usize;
+        let sector_count = data.len() / sector_len;
 
-        let mut difat: Vec<u32> = (0..HEADER_DIFAT_ENTRIES)
-            .map(|i| u32_at(&data, 0x4c + i * 4))
+        let mut difat: Vec<u32> = header
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .skip(0x4c / 4)
+            .take(HEADER_DIFAT_ENTRIES)
+            .map(|word| u32::from_le_bytes(*word))
             .take_while(|&sector| sector <= MAXREGSECT)
             .collect();
         let mut next = first_difat;
         let mut visited = 0usize;
-        while next <= MAXREGSECT && visited < difat_count.max(1) && visited < MAX_CHAIN {
+        while next <= MAXREGSECT
+            && visited < difat_count.max(1)
+            && visited <= sector_count
+            && difat.len() <= sector_count
+        {
             let Some(sector) = sector_bytes(&data, sector_len, next) else {
                 break;
             };
-            let entries = sector_len / 4 - 1;
+            let (words, _) = sector.as_chunks::<4>();
+            let Some((last, words)) = words.split_last().filter(|_| sector.len() == sector_len)
+            else {
+                return Err(cfb("truncated DIFAT sector"));
+            };
             difat.extend(
-                (0..entries)
-                    .map(|i| u32_at(sector, i * 4))
+                words
+                    .iter()
+                    .map(|word| u32::from_le_bytes(*word))
                     .take_while(|&s| s <= MAXREGSECT),
             );
-            next = u32_at(sector, entries * 4);
+            next = u32::from_le_bytes(*last);
             visited += 1;
         }
         if fat_sector_count > 0 {
             difat.truncate(fat_sector_count);
         }
 
-        let mut fat = Vec::with_capacity(difat.len() * (sector_len / 4));
+        let mut fat = Vec::with_capacity((difat.len() * (sector_len / 4)).min(data.len() / 4));
         for &sector in &difat {
             let Some(bytes) = sector_bytes(&data, sector_len, sector) else {
                 break;
             };
-            fat.extend((0..sector_len / 4).map(|i| u32_at(bytes, i * 4)));
+            if bytes.len() < sector_len {
+                return Err(cfb("truncated FAT sector"));
+            }
+            fat.extend(
+                bytes
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|word| u32::from_le_bytes(*word)),
+            );
         }
 
         let directory = read_chain(&data, sector_len, &fat, first_directory, u64::MAX);
-        let mut entries = Vec::with_capacity(directory.len() / DIRECTORY_ENTRY_LEN);
-        for raw in directory.as_chunks::<DIRECTORY_ENTRY_LEN>().0 {
-            entries.push(parse_entry(raw, major));
-        }
-        if entries.is_empty() {
+        let entries = directory
+            .as_chunks::<DIRECTORY_ENTRY_LEN>()
+            .0
+            .iter()
+            .map(|raw| parse_entry(raw, major))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| cfb("truncated directory entry"))?;
+        let Some(root) = entries.first() else {
             return Err(cfb("empty directory"));
-        }
-
-        let root = &entries[0];
+        };
         let mini_stream = match root.size {
             0 => Vec::new(),
             size => read_chain(&data, sector_len, &fat, root.start, size),
@@ -186,14 +211,16 @@ impl Compound {
         let child = entry.child;
         let mut stack = vec![child];
         while let Some(current) = stack.pop() {
-            if current == NOSTREAM
-                || current as usize >= self.entries.len()
-                || seen[current as usize]
-            {
+            let (Some(node), Some(visited)) = (
+                self.entries.get(current as usize),
+                seen.get_mut(current as usize),
+            ) else {
+                continue;
+            };
+            if *visited {
                 continue;
             }
-            seen[current as usize] = true;
-            let node = &self.entries[current as usize];
+            *visited = true;
             let path = match prefix.is_empty() {
                 true => node.name.clone(),
                 false => format!("{prefix}/{}", node.name),
@@ -222,11 +249,15 @@ impl Compound {
         let mut stack = vec![root];
         let mut seen = vec![false; self.entries.len()];
         while let Some(id) = stack.pop() {
-            if id == NOSTREAM || id as usize >= self.entries.len() || seen[id as usize] {
+            let (Some(entry), Some(visited)) =
+                (self.entries.get(id as usize), seen.get_mut(id as usize))
+            else {
+                continue;
+            };
+            if *visited {
                 continue;
             }
-            seen[id as usize] = true;
-            let entry = &self.entries[id as usize];
+            *visited = true;
             if entry.kind != EntryKind::Unallocated && entry.name.eq_ignore_ascii_case(name) {
                 return Some(entry);
             }
@@ -255,16 +286,16 @@ impl Compound {
             return Vec::new();
         }
         if entry.size < self.mini_cutoff {
-            let mut out = Vec::with_capacity(entry.size as usize);
+            let mut out = Vec::with_capacity((entry.size as usize).min(self.mini_stream.len()));
             let mut sector = entry.start;
             let mut steps = 0usize;
-            while sector <= MAXREGSECT && (out.len() as u64) < entry.size && steps < MAX_CHAIN {
+            let max_steps = self.mini_stream.len() / MINI_SECTOR_LEN + 1;
+            while sector <= MAXREGSECT && (out.len() as u64) < entry.size && steps < max_steps {
                 let start = sector as usize * MINI_SECTOR_LEN;
                 let Some(bytes) = self.mini_stream.get(start..) else {
                     break;
                 };
-                let take = bytes.len().min(MINI_SECTOR_LEN);
-                out.extend_from_slice(&bytes[..take]);
+                out.extend_from_slice(bytes.get(..MINI_SECTOR_LEN).unwrap_or(bytes));
                 sector = self
                     .mini_fat
                     .get(sector as usize)
@@ -289,27 +320,22 @@ fn cfb(msg: &str) -> Error {
     Error::Other(format!("compound file: {msg}"))
 }
 
-fn u16_at(bytes: &[u8], offset: usize) -> u16 {
-    u16::from_le_bytes([bytes[offset], bytes[offset + 1]])
+fn u16_at(bytes: &[u8], offset: usize) -> Option<u16> {
+    let raw = bytes.get(offset..)?.first_chunk::<2>()?;
+    Some(u16::from_le_bytes(*raw))
 }
 
-fn u32_at(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ])
+fn u32_at(bytes: &[u8], offset: usize) -> Option<u32> {
+    let raw = bytes.get(offset..)?.first_chunk::<4>()?;
+    Some(u32::from_le_bytes(*raw))
 }
 
-/// The bytes of regular sector `sector`, or None past the end of the file.
+/// The bytes of regular sector `sector`, shorter at the end of a truncated
+/// file, or None past the end of the file.
 fn sector_bytes(data: &[u8], sector_len: usize, sector: u32) -> Option<&[u8]> {
     let start = (sector as usize + 1).checked_mul(sector_len)?;
-    let end = start.checked_add(sector_len)?;
-    match end <= data.len() {
-        true => Some(&data[start..end]),
-        false => data.get(start..).filter(|rest| !rest.is_empty()),
-    }
+    let rest = data.get(start..).filter(|rest| !rest.is_empty())?;
+    Some(rest.get(..sector_len).unwrap_or(rest))
 }
 
 /// Concatenates the FAT chain from `start`, up to `size` bytes (or the whole chain).
@@ -317,7 +343,8 @@ fn read_chain(data: &[u8], sector_len: usize, fat: &[u32], start: u32, size: u64
     let mut out = Vec::new();
     let mut sector = start;
     let mut steps = 0usize;
-    while sector <= MAXREGSECT && (out.len() as u64) < size && steps < MAX_CHAIN {
+    let max_steps = data.len() / sector_len + 1;
+    while sector <= MAXREGSECT && (out.len() as u64) < size && steps < max_steps {
         let Some(bytes) = sector_bytes(data, sector_len, sector) else {
             break;
         };
@@ -325,16 +352,16 @@ fn read_chain(data: &[u8], sector_len: usize, fat: &[u32], start: u32, size: u64
         sector = fat.get(sector as usize).copied().unwrap_or(ENDOFCHAIN);
         steps += 1;
     }
-    if size != u64::MAX {
-        out.truncate(size as usize);
+    if let Ok(size) = usize::try_from(size) {
+        out.truncate(size);
     }
     out
 }
 
-fn parse_entry(raw: &[u8], major: u16) -> Entry {
-    let declared = usize::from(u16_at(raw, 0x40)).min(64);
-    let name_bytes = &raw[..declared];
-    let units: Vec<u16> = name_bytes
+fn parse_entry(raw: &[u8; DIRECTORY_ENTRY_LEN], major: u16) -> Option<Entry> {
+    let declared = usize::from(u16_at(raw, 0x40)?).min(64);
+    let units: Vec<u16> = raw
+        .get(..declared)?
         .as_chunks::<2>()
         .0
         .iter()
@@ -342,25 +369,25 @@ fn parse_entry(raw: &[u8], major: u16) -> Entry {
         .take_while(|&unit| unit != 0)
         .collect();
     let name = String::from_utf16_lossy(&units);
-    let kind = match raw[0x42] {
+    let kind = match raw.get(0x42)? {
         1 => EntryKind::Storage,
         2 => EntryKind::Stream,
         5 => EntryKind::Root,
         _ => EntryKind::Unallocated,
     };
-    let mut size = u64::from(u32_at(raw, 0x78)) | (u64::from(u32_at(raw, 0x7c)) << 32);
+    let mut size = u64::from(u32_at(raw, 0x78)?) | (u64::from(u32_at(raw, 0x7c)?) << 32);
     if major == 3 {
         size &= 0xffff_ffff;
     }
-    Entry {
+    Some(Entry {
         name,
         kind,
-        left: u32_at(raw, 0x44),
-        right: u32_at(raw, 0x48),
-        child: u32_at(raw, 0x4c),
-        start: u32_at(raw, 0x74),
+        left: u32_at(raw, 0x44)?,
+        right: u32_at(raw, 0x48)?,
+        child: u32_at(raw, 0x4c)?,
+        start: u32_at(raw, 0x74)?,
         size,
-    }
+    })
 }
 
 /// Builds a minimal version-3 compound file: root storage with streams,
@@ -468,7 +495,9 @@ impl Writer {
             if entry.3 {
                 continue;
             }
-            let data = regular_iter.next().expect("one regular stream per entry");
+            let Some(data) = regular_iter.next() else {
+                break;
+            };
             entry.1 = match data.is_empty() {
                 true => ENDOFCHAIN,
                 false => allocate(data.len().div_ceil(SECTOR), &mut fat),
@@ -691,6 +720,67 @@ mod tests {
         let compound = Compound::from_bytes(cut);
         if let Ok(compound) = compound {
             let _ = compound.stream("a");
+        }
+    }
+
+    /// A written file whose last sector, after `patch` points the header at
+    /// it, is cut to 186 bytes.
+    fn cut_in_last_sector(patch: impl Fn(&mut [u8], u32)) -> Vec<u8> {
+        let big = vec![7u8; 5000];
+        let mut bytes = Writer::new().stream("Big", &big).build();
+        let last = (bytes.len() / 512 - 2) as u32;
+        patch(&mut bytes, last);
+        bytes.truncate(512 + last as usize * 512 + 186);
+        bytes
+    }
+
+    #[test]
+    fn a_fat_sector_cut_short_is_an_error() {
+        let bytes = cut_in_last_sector(|bytes, last| {
+            bytes[0x4c..0x50].copy_from_slice(&last.to_le_bytes());
+        });
+        let err = Compound::from_bytes(bytes).err().unwrap();
+        assert!(err.to_string().contains("truncated FAT sector"), "{err}");
+    }
+
+    #[test]
+    fn a_difat_sector_cut_short_is_an_error() {
+        let bytes = cut_in_last_sector(|bytes, last| {
+            bytes[0x44..0x48].copy_from_slice(&last.to_le_bytes());
+            bytes[0x48..0x4c].copy_from_slice(&1u32.to_le_bytes());
+        });
+        let err = Compound::from_bytes(bytes).err().unwrap();
+        assert!(err.to_string().contains("truncated DIFAT sector"), "{err}");
+    }
+
+    #[test]
+    fn a_declared_size_past_the_mini_stream_reads_what_is_there() {
+        let mut bytes = Writer::new().stream("a", b"tiny").build();
+        bytes[0x38..0x3c].copy_from_slice(&u32::MAX.to_le_bytes());
+        let size_at = 1024 + DIRECTORY_ENTRY_LEN + 0x78;
+        bytes[size_at..size_at + 4].copy_from_slice(&0xffff_fff0u32.to_le_bytes());
+        let compound = Compound::from_bytes(bytes).unwrap();
+        let stream = compound.stream("a").unwrap();
+        assert!(
+            stream.starts_with(b"tiny") && stream.len() <= 512,
+            "{}",
+            stream.len()
+        );
+    }
+
+    #[test]
+    fn every_truncation_of_a_written_file_returns() {
+        let big: Vec<u8> = (0..20_000u32).map(|i| (i % 251) as u8).collect();
+        let bytes = Writer::new()
+            .stream("Current User", b"tiny")
+            .stream("PowerPoint Document", &big)
+            .build();
+        for len in 0..bytes.len() {
+            if let Ok(compound) = Compound::from_bytes(bytes[..len].to_vec()) {
+                let _ = compound.stream_paths();
+                let _ = compound.stream("PowerPoint Document");
+                let _ = compound.stream("Current User");
+            }
         }
     }
 }

@@ -104,6 +104,15 @@ def test_errors_are_pptx_errors(tmp_path: Path) -> None:
     assert issubclass(pptxboss.PptxError, Exception)
 
 
+def test_a_truncated_legacy_ppt_raises_pptx_error(legacy_ppt: Path) -> None:
+    data = bytearray(legacy_ppt.read_bytes())
+    last = len(data) // 512 - 2
+    data[0x4C:0x50] = last.to_bytes(4, "little")
+    cut = bytes(data[: 512 + last * 512 + 186])
+    with pytest.raises(pptxboss.PptxError, match="truncated FAT sector"):
+        pptxboss.Document(data=cut)
+
+
 def test_documents_are_usable_from_threads(three_slides_pptx: Path) -> None:
     doc = pptxboss.Document(three_slides_pptx)
     with ThreadPoolExecutor(max_workers=4) as pool:
