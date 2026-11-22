@@ -752,7 +752,7 @@ fn read_everything(bytes: Vec<u8>) {
     }
 }
 
-fn compound_of(streams: &[(String, Vec<u8>)]) -> Vec<u8> {
+fn build_compound(streams: &[(String, Vec<u8>)]) -> Vec<u8> {
     streams
         .iter()
         .fold(cfb::Writer::new(), |writer, (name, data)| {
@@ -773,7 +773,7 @@ fn every_truncation_of_a_legacy_ppt_returns() {
         for len in 0..data.len() {
             let mut cut = streams.clone();
             cut[target].1.truncate(len);
-            read_everything(compound_of(&cut));
+            read_everything(build_compound(&cut));
         }
     }
 }

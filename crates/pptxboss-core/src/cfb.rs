@@ -76,10 +76,10 @@ impl Compound {
         let Some(header) = data.first_chunk::<HEADER_LEN>().filter(|h| is_compound(*h)) else {
             return Err(cfb("missing compound file signature"));
         };
-        let header16 = |offset| u16_at(header, offset).ok_or_else(|| cfb("truncated header"));
-        let header32 = |offset| u32_at(header, offset).ok_or_else(|| cfb("truncated header"));
-        let major = header16(0x1a)?;
-        let sector_shift = header16(0x1e)?;
+        let read_u16 = |offset| u16_at(header, offset).ok_or_else(|| cfb("truncated header"));
+        let read_u32 = |offset| u32_at(header, offset).ok_or_else(|| cfb("truncated header"));
+        let major = read_u16(0x1a)?;
+        let sector_shift = read_u16(0x1e)?;
         if !matches!(major, 3 | 4) {
             return Err(cfb(&format!("unsupported major version {major}")));
         }
@@ -90,16 +90,16 @@ impl Compound {
         if data.len() < sector_len * 3 {
             return Err(cfb("file shorter than three sectors"));
         }
-        let fat_sector_count = header32(0x2c)? as usize;
-        let first_directory = header32(0x30)?;
-        let mut mini_cutoff = u64::from(header32(0x38)?);
+        let fat_sector_count = read_u32(0x2c)? as usize;
+        let first_directory = read_u32(0x30)?;
+        let mut mini_cutoff = u64::from(read_u32(0x38)?);
         if mini_cutoff == 0 {
             mini_cutoff = DEFAULT_MINI_CUTOFF;
         }
-        let first_mini_fat = header32(0x3c)?;
-        let mini_fat_count = header32(0x40)? as usize;
-        let first_difat = header32(0x44)?;
-        let difat_count = header32(0x48)? as usize;
+        let first_mini_fat = read_u32(0x3c)?;
+        let mini_fat_count = read_u32(0x40)? as usize;
+        let first_difat = read_u32(0x44)?;
+        let difat_count = read_u32(0x48)? as usize;
         let sector_count = data.len() / sector_len;
 
         let mut difat: Vec<u32> = header
