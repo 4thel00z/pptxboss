@@ -1,3 +1,4 @@
+use pptxboss_core::cfb;
 use pptxboss_core::document::Located;
 use pptxboss_core::inflate::{deck_limit, MAX_PART_BYTES};
 use pptxboss_core::{Content, Document, Error, MarkdownOptions, TextOptions};
@@ -731,4 +732,48 @@ fn a_selected_broken_slide_is_reported_under_its_own_number() {
     assert!(report.warnings()[0].starts_with("slide 3: unreadable"));
     let (_, report) = doc.markdown_at(&[2], &MarkdownOptions::default());
     assert!(report.warnings()[0].starts_with("slide 3: unreadable"));
+}
+
+fn read_everything(bytes: Vec<u8>) {
+    let Ok(doc) = Document::load(bytes) else {
+        return;
+    };
+    let _ = doc.text_reporting(&TextOptions::default());
+    let _ = doc.markdown(&MarkdownOptions::default());
+    for index in 0..doc.slide_count() {
+        let Ok(slide) = doc.slide(index) else {
+            continue;
+        };
+        let _ = slide.text();
+        let _ = slide.notes_text();
+        for image in slide.images().unwrap_or_default() {
+            let _ = slide.image_bytes(&image);
+        }
+    }
+}
+
+fn compound_of(streams: &[(String, Vec<u8>)]) -> Vec<u8> {
+    streams
+        .iter()
+        .fold(cfb::Writer::new(), |writer, (name, data)| {
+            writer.stream(name, data)
+        })
+        .build()
+}
+
+#[test]
+fn every_truncation_of_a_legacy_ppt_returns() {
+    let deck = legacy_deck();
+    let file = deck.build();
+    for len in 0..file.len() {
+        read_everything(file[..len].to_vec());
+    }
+    let streams = deck.streams();
+    for (target, (_, data)) in streams.iter().enumerate() {
+        for len in 0..data.len() {
+            let mut cut = streams.clone();
+            cut[target].1.truncate(len);
+            read_everything(compound_of(&cut));
+        }
+    }
 }
