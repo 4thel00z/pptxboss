@@ -42,6 +42,7 @@ class Document:
         comments: bool = False,
         charts: bool = True,
         diagrams: bool = True,
+        reading_order: str = "content",
     ) -> str: ...
     def text_reporting(
         self,
@@ -54,6 +55,7 @@ class Document:
         comments: bool = False,
         charts: bool = True,
         diagrams: bool = True,
+        reading_order: str = "content",
     ) -> tuple[str, list[str]]: ...
     def extract(
         self,
@@ -67,6 +69,7 @@ class Document:
         comments: bool = False,
         charts: bool = True,
         diagrams: bool = True,
+        reading_order: str = "content",
     ) -> tuple[str, ExtractReport]:
         """The text plus a structured report of what was skipped; `indexes` picks slides (zero-based, negatives from the end) in the written order."""
     def slide_texts(
@@ -81,6 +84,7 @@ class Document:
         comments: bool = False,
         charts: bool = True,
         diagrams: bool = True,
+        reading_order: str = "content",
     ) -> list[str]: ...
     def titles(self) -> list[str | None]: ...
     def markdown(
@@ -94,6 +98,7 @@ class Document:
         hidden_shapes: bool = False,
         furniture: bool = False,
         images: bool = True,
+        reading_order: str = "content",
     ) -> str: ...
     def core_properties(self) -> CoreProperties | None: ...
     def app_properties(self) -> AppProperties | None: ...
@@ -134,6 +139,7 @@ class Slide:
         alt_text: bool = False,
         charts: bool = True,
         diagrams: bool = True,
+        reading_order: str = "content",
     ) -> str: ...
     def markdown(
         self,
@@ -144,6 +150,7 @@ class Slide:
         hidden_shapes: bool = False,
         furniture: bool = False,
         images: bool = True,
+        reading_order: str = "content",
     ) -> str: ...
     def paragraphs(self) -> list[str]: ...
     def notes(self) -> str | None: ...

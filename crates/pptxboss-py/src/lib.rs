@@ -16,7 +16,7 @@ use pyo3::types::PyBytes;
 use pptxboss_core::model::{Content, PlaceholderKind, Shape as CoreShape, SlideContent};
 use pptxboss_core::text::write_content_text;
 use pptxboss_core::{
-    Document as CoreDocument, DocumentSeed, MarkdownOptions, SlideReport, TextOptions,
+    Document as CoreDocument, DocumentSeed, MarkdownOptions, ReadingOrder, SlideReport, TextOptions,
 };
 
 create_exception!(
@@ -256,7 +256,7 @@ impl Document {
     }
 
     /// The text of the whole deck: slides separated by a blank line.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
@@ -269,7 +269,8 @@ impl Document {
         comments: bool,
         charts: bool,
         diagrams: bool,
-    ) -> String {
+        reading_order: &str,
+    ) -> PyResult<String> {
         let mut options = options(
             notes,
             furniture,
@@ -280,12 +281,13 @@ impl Document {
         );
         options.charts = charts;
         options.diagrams = diagrams;
+        options.reading_order = parse_reading_order(reading_order)?;
         let seed = self.seed.clone();
-        py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options).0)
+        Ok(py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options).0))
     }
 
     /// The text plus one warning line per problem the reader skipped.
-    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[pyo3(signature = (*, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn text_reporting(
         &self,
@@ -298,7 +300,8 @@ impl Document {
         comments: bool,
         charts: bool,
         diagrams: bool,
-    ) -> (String, Vec<String>) {
+        reading_order: &str,
+    ) -> PyResult<(String, Vec<String>)> {
         let mut options = options(
             notes,
             furniture,
@@ -309,16 +312,17 @@ impl Document {
         );
         options.charts = charts;
         options.diagrams = diagrams;
+        options.reading_order = parse_reading_order(reading_order)?;
         let seed = self.seed.clone();
         let (text, report) =
             py.allow_threads(|| CoreDocument::from_seed(seed).text_reporting(&options));
-        (text, report.warnings())
+        Ok((text, report.warnings()))
     }
 
     /// The text plus a structured report of what was skipped. `indexes`
     /// picks slides by zero-based index (negatives count from the end) in
     /// the written order.
-    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn extract(
         &self,
@@ -332,6 +336,7 @@ impl Document {
         comments: bool,
         charts: bool,
         diagrams: bool,
+        reading_order: &str,
     ) -> PyResult<(String, ExtractReport)> {
         let mut options = options(
             notes,
@@ -343,6 +348,7 @@ impl Document {
         );
         options.charts = charts;
         options.diagrams = diagrams;
+        options.reading_order = parse_reading_order(reading_order)?;
         let indexes = self.resolve_indexes(indexes)?;
         let seed = self.seed.clone();
         let (text, report) = py.allow_threads(|| {
@@ -361,7 +367,7 @@ impl Document {
     /// One string per slide, in order, extracted in parallel. `indexes`
     /// picks slides by zero-based index (negatives count from the end) in
     /// the written order.
-    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true))]
+    #[pyo3(signature = (*, indexes=None, notes=false, furniture=false, hidden_shapes=false, hidden_slides=true, alt_text=false, comments=false, charts=true, diagrams=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn slide_texts(
         &self,
@@ -375,6 +381,7 @@ impl Document {
         comments: bool,
         charts: bool,
         diagrams: bool,
+        reading_order: &str,
     ) -> PyResult<Vec<String>> {
         let mut options = options(
             notes,
@@ -386,6 +393,7 @@ impl Document {
         );
         options.charts = charts;
         options.diagrams = diagrams;
+        options.reading_order = parse_reading_order(reading_order)?;
         let indexes = self.resolve_indexes(indexes)?;
         let seed = self.seed.clone();
         Ok(py.allow_threads(|| {
@@ -459,7 +467,7 @@ impl Document {
 
     /// The deck as Markdown: a heading per slide, bullets, tables, images,
     /// chart tables and diagram outlines; notes and comments as block quotes on request.
-    #[pyo3(signature = (*, indexes=None, headings=true, notes=false, comments=false, hidden_slides=true, hidden_shapes=false, furniture=false, images=true))]
+    #[pyo3(signature = (*, indexes=None, headings=true, notes=false, comments=false, hidden_slides=true, hidden_shapes=false, furniture=false, images=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn markdown(
         &self,
@@ -472,8 +480,9 @@ impl Document {
         hidden_shapes: bool,
         furniture: bool,
         images: bool,
+        reading_order: &str,
     ) -> PyResult<String> {
-        let options = markdown_options(
+        let mut options = markdown_options(
             headings,
             notes,
             comments,
@@ -482,6 +491,7 @@ impl Document {
             furniture,
             images,
         );
+        options.reading_order = parse_reading_order(reading_order)?;
         let indexes = self.resolve_indexes(indexes)?;
         let seed = self.seed.clone();
         Ok(py.allow_threads(|| {
@@ -666,7 +676,8 @@ impl Slide {
     }
 
     /// The slide's text: shapes in z-order, paragraphs one per line.
-    #[pyo3(signature = (*, furniture=false, hidden_shapes=false, alt_text=false, charts=true, diagrams=true))]
+    #[pyo3(signature = (*, furniture=false, hidden_shapes=false, alt_text=false, charts=true, diagrams=true, reading_order="content"))]
+    #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
         py: Python<'_>,
@@ -675,11 +686,14 @@ impl Slide {
         alt_text: bool,
         charts: bool,
         diagrams: bool,
+        reading_order: &str,
     ) -> PyResult<String> {
         let mut text_options = options(false, furniture, hidden_shapes, true, alt_text, false);
         text_options.charts = charts;
         text_options.diagrams = diagrams;
-        if !charts && !diagrams {
+        text_options.reading_order = parse_reading_order(reading_order)?;
+        let content_order = text_options.reading_order == ReadingOrder::Content;
+        if content_order && !charts && !diagrams {
             let mut out = String::new();
             write_content_text(&self.content, &text_options, &mut |_| None, &mut out);
             return Ok(out);
@@ -696,7 +710,7 @@ impl Slide {
     }
 
     /// This slide as Markdown, without a trailing newline.
-    #[pyo3(signature = (*, headings=true, notes=false, comments=false, hidden_shapes=false, furniture=false, images=true))]
+    #[pyo3(signature = (*, headings=true, notes=false, comments=false, hidden_shapes=false, furniture=false, images=true, reading_order="content"))]
     #[allow(clippy::too_many_arguments)]
     fn markdown(
         &self,
@@ -707,8 +721,9 @@ impl Slide {
         hidden_shapes: bool,
         furniture: bool,
         images: bool,
+        reading_order: &str,
     ) -> PyResult<String> {
-        let options = markdown_options(
+        let mut options = markdown_options(
             headings,
             notes,
             comments,
@@ -717,6 +732,7 @@ impl Slide {
             furniture,
             images,
         );
+        options.reading_order = parse_reading_order(reading_order)?;
         let seed = self.seed.clone();
         let index = self.index;
         py.allow_threads(|| {
@@ -1148,7 +1164,15 @@ fn markdown_options(
         hidden_shapes,
         furniture,
         images,
+        reading_order: ReadingOrder::Content,
     }
+}
+
+/// Maps the Python `reading_order=` string to a [`ReadingOrder`].
+fn parse_reading_order(value: &str) -> PyResult<ReadingOrder> {
+    value
+        .parse()
+        .map_err(|err: pptxboss_core::Error| PyValueError::new_err(err.to_string()))
 }
 
 /// One series of a chart.

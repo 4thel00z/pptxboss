@@ -3,7 +3,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use pptxboss_core::slide::parse_slide;
-use pptxboss_core::{Document, TextOptions};
+use pptxboss_core::{Document, ReadingOrder, TextOptions};
 use pptxboss_testkit::{Deck, DeckSlide};
 
 fn deck(slides: usize, bullets: usize) -> Vec<u8> {
@@ -60,6 +60,22 @@ fn bench_text(c: &mut Criterion) {
                     Document::load(bytes.clone())
                         .unwrap()
                         .text_reporting(&TextOptions::default())
+                        .0
+                        .len()
+                })
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("parallel-geometric", format!("{slides}x{bullets}")),
+            &bytes,
+            |b, bytes| {
+                b.iter(|| {
+                    Document::load(bytes.clone())
+                        .unwrap()
+                        .text_reporting(&TextOptions {
+                            reading_order: ReadingOrder::Geometric,
+                            ..TextOptions::default()
+                        })
                         .0
                         .len()
                 })

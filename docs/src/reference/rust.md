@@ -16,5 +16,9 @@ seed keeps the cap. A legacy `.ppt` deck stays on the calling thread
 unless a cap is set explicitly, because spreading them costs more than
 it saves.
 
+`TextOptions` and `MarkdownOptions` carry a `reading_order: ReadingOrder`
+(`Content`, the default, or `Geometric`); `ReadingOrder` parses from and
+prints as `"content"` and `"geometric"`.
+
 Every error type is a `thiserror` enum per crate: `pptxboss_core::Error`,
 `pptxboss_write::Error`.

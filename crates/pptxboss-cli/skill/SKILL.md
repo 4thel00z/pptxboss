@@ -30,6 +30,7 @@ pptxboss text --notes --headings deck.pptx
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}]
 pptxboss text --slides 2-4,7 deck.pptx  # only those slides, in that order; also on info and markdown
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number placeholders
+pptxboss text --reading-order geometric deck.pptx   # read by position, not slide-XML order (also on markdown)
 pptxboss text --comments --alt-text deck.pptx   # comments after each slide; alt text of pictures
 pptxboss text --no-charts --no-diagrams deck.pptx   # slide text without chart data or SmartArt
 pptxboss markdown --notes deck.pptx     # the deck as Markdown: headings, bullets, tables, images, charts
@@ -66,7 +67,7 @@ doc = pptxboss.Document("deck.pptx")          # or Document(data=bytes), threads
 doc.slide_count; len(doc); doc.slide_size; doc.slide_size_type
 for slide in doc:                              # lazy, parsed on demand
     slide.number; slide.title; slide.hidden; slide.name
-    slide.text()                               # z-order text, options: furniture=, hidden_shapes=
+    slide.text()                               # z-order text, options: furniture=, hidden_shapes=, reading_order="geometric"
     slide.paragraphs()                         # every non-empty paragraph incl. table cells
     slide.notes()                              # speaker notes or None
     slide.comments()                           # Comment(author, initials, date, text, reply)

@@ -29,21 +29,23 @@ slide: number, title or `(no title)`, and flags among `hidden`, `notes`,
 `pictures`, `tables`, `objects`, `comments`. A slide that fails to parse
 shows `(unreadable: reason)`.
 
-## `pptxboss text FILE [--slides RANGE] [--notes] [--comments] [--alt-text] [--no-charts] [--no-diagrams] [--furniture] [--hidden-shapes] [--skip-hidden] [--headings] [--json]`
+## `pptxboss text FILE [--slides RANGE] [--notes] [--comments] [--alt-text] [--no-charts] [--no-diagrams] [--furniture] [--hidden-shapes] [--skip-hidden] [--reading-order ORDER] [--headings] [--json]`
 
 Slide text, slides separated by a blank line; empty slides are skipped
 unless `--headings` or `--json` is given. `--comments` appends
 `[comment] Author: text` lines (replies as `[reply]`) after a slide's text
 and notes; `--alt-text` adds the alternative text of pictures and other
 shapes that have no text. Chart data and diagram text are included unless
-`--no-charts` or `--no-diagrams` is given.
+`--no-charts` or `--no-diagrams` is given. `--reading-order` is `content`
+(the default, the order the slide lists its shapes in) or `geometric` (by
+position: rows top to bottom, shapes in a row left to right).
 
-## `pptxboss markdown FILE [--slides RANGE] [--notes] [--comments] [--skip-hidden] [--hidden-shapes] [--furniture] [--no-headings] [--no-images]`
+## `pptxboss markdown FILE [--slides RANGE] [--notes] [--comments] [--skip-hidden] [--hidden-shapes] [--furniture] [--no-headings] [--no-images] [--reading-order ORDER]`
 
 The deck as Markdown on stdout: a `## Title` heading per slide, bullets,
 paragraphs, GFM tables, images, chart tables and diagram outlines, slides
-separated by a rule; `--notes` and `--comments` add block quotes. Warnings
-go to stderr as for `text`.
+separated by a rule; `--notes` and `--comments` add block quotes.
+`--reading-order` works as for `text`. Warnings go to stderr as for `text`.
 
 ## `pptxboss check FILE [--json] [--quiet] [--max-findings N] [--no-crc]`
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use pptxboss_core::{Document, MarkdownOptions, TextOptions};
+use pptxboss_core::{Document, MarkdownOptions, ReadingOrder, TextOptions};
 
 mod check;
 mod create;
@@ -27,6 +27,26 @@ struct Cli {
     threads: Option<usize>,
     #[command(subcommand)]
     command: Command,
+}
+
+/// `--reading-order` values for `text` and `markdown`, mapped onto
+/// `pptxboss_core::ReadingOrder`.
+#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+enum ReadingOrderArg {
+    /// The order the slide lists its shapes in (default).
+    #[default]
+    Content,
+    /// Position alone: rows top to bottom, shapes in a row left to right.
+    Geometric,
+}
+
+impl ReadingOrderArg {
+    fn to_order(self) -> ReadingOrder {
+        match self {
+            ReadingOrderArg::Content => ReadingOrder::Content,
+            ReadingOrderArg::Geometric => ReadingOrder::Geometric,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -71,6 +91,9 @@ enum Command {
         /// Leave out the text of diagrams (SmartArt).
         #[arg(long)]
         no_diagrams: bool,
+        /// The order shapes are read in: as listed in the slide, or by position.
+        #[arg(long, value_enum, default_value_t = ReadingOrderArg::Content)]
+        reading_order: ReadingOrderArg,
         /// Print a `--- slide N ---` heading before each slide.
         #[arg(long)]
         headings: bool,
@@ -105,6 +128,9 @@ enum Command {
         /// Leave images out.
         #[arg(long)]
         no_images: bool,
+        /// The order shapes are read in: as listed in the slide, or by position.
+        #[arg(long, value_enum, default_value_t = ReadingOrderArg::Content)]
+        reading_order: ReadingOrderArg,
     },
     /// Verify a deck against ECMA-376: container, package, relationships and PresentationML structure.
     ///
@@ -182,6 +208,7 @@ fn main() -> ExitCode {
             comments,
             no_charts,
             no_diagrams,
+            reading_order,
             headings,
             json,
         } => {
@@ -194,6 +221,7 @@ fn main() -> ExitCode {
                 comments,
                 charts: !no_charts,
                 diagrams: !no_diagrams,
+                reading_order: reading_order.to_order(),
                 ..TextOptions::default()
             };
             open(&file, threads).and_then(|doc| {
@@ -211,6 +239,7 @@ fn main() -> ExitCode {
             furniture,
             no_headings,
             no_images,
+            reading_order,
         } => {
             let options = MarkdownOptions {
                 headings: !no_headings,
@@ -220,6 +249,7 @@ fn main() -> ExitCode {
                 hidden_shapes,
                 furniture,
                 images: !no_images,
+                reading_order: reading_order.to_order(),
             };
             open(&file, threads).and_then(|doc| {
                 let indices = select(&doc, slides.as_deref())?;
