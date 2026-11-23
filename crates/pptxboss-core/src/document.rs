@@ -6,6 +6,8 @@
 //! which any thread can build its own `Document` over the same archive,
 //! which is how [`Document::map_slides`] spreads work across cores.
 
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,15 +18,16 @@ use crate::chart::{parse_chart, ChartData};
 use crate::comments::{parse_authors, parse_comments, Comment, CommentAuthor};
 use crate::diagram::{parse_diagram, DiagramData};
 use crate::error::{Error, Result};
-use crate::model::{Content, PlaceholderKind, SlideContent, TextBody};
+use crate::model::{Content, PlaceholderKind, Shape, SlideContent, TextBody};
 use crate::opc::{Relationships, TargetMode};
+use crate::order::{collect_placeholder_frames, match_placeholder, Frame, PlaceholderFrames};
 use crate::package::{Package, PackageSeed};
 use crate::pml::{content_type, RelKind};
 use crate::ppt::{self, LegacyDeck};
 use crate::presentation::Presentation;
 use crate::properties::{AppProperties, CoreProperties};
 use crate::slide::{parse_slide, SlideReport};
-use crate::text::{write_content_text, ExtractReport, TextOptions};
+use crate::text::{write_slide_text, ExtractReport, TextOptions};
 use crate::zip::{FileSource, Source};
 
 /// How the presentation part was found.
@@ -116,6 +119,14 @@ pub struct Document {
     package: Option<Package>,
     shared: Arc<Shared>,
     threads: usize,
+    /// Placeholder frames per layout part, read on first use.
+    inherited: RefCell<HashMap<String, Option<Rc<InheritedFrames>>>>,
+}
+
+/// The frames the placeholders of a layout and of its master declare.
+struct InheritedFrames {
+    layout: PlaceholderFrames,
+    master: PlaceholderFrames,
 }
 
 /// The default worker limit: `PPTXBOSS_THREADS` when set to a number, else 0 (every core).
@@ -203,6 +214,7 @@ impl Document {
             package: None,
             shared,
             threads: threads_from_env(),
+            inherited: RefCell::default(),
         }
     }
 
@@ -268,6 +280,7 @@ impl Document {
             package: Some(package),
             shared,
             threads: threads_from_env(),
+            inherited: RefCell::default(),
         })
     }
 
@@ -398,6 +411,7 @@ impl Document {
             package: seed.shared.package.clone().map(Package::from_seed),
             shared: seed.shared,
             threads: seed.threads,
+            inherited: RefCell::default(),
         }
     }
 
@@ -479,6 +493,35 @@ impl Document {
     /// Every slide in order; a slide that fails to parse yields its error and iteration continues.
     pub fn slides(&self) -> impl Iterator<Item = Result<Slide<'_>>> + '_ {
         (0..self.slide_count()).map(move |index| self.slide(index))
+    }
+
+    /// The placeholder frames of a layout and its master; None when either
+    /// part cannot be read, which leaves its placeholders unpositioned.
+    fn fetch_inherited_frames(&self, layout_part: &str) -> Option<Rc<InheritedFrames>> {
+        if let Some(cached) = self.inherited.borrow().get(layout_part) {
+            return cached.clone();
+        }
+        let loaded = self.load_inherited_frames(layout_part).map(Rc::new);
+        self.inherited
+            .borrow_mut()
+            .insert(layout_part.to_string(), loaded.clone());
+        loaded
+    }
+
+    fn load_inherited_frames(&self, layout_part: &str) -> Option<InheritedFrames> {
+        let (layout, _) = self.slide_part(layout_part).ok()?;
+        let rels = self.pkg().ok()?.rels(layout_part).ok()?;
+        let master = rels
+            .iter()
+            .filter(|rel| RelKind::of(&rel.rel_type) == RelKind::SlideMaster)
+            .find_map(|rel| rels.resolve(rel))
+            .and_then(|part| self.slide_part(&part).ok())
+            .map(|(master, _)| collect_placeholder_frames(&master.shapes))
+            .unwrap_or_default();
+        Some(InheritedFrames {
+            layout: collect_placeholder_frames(&layout.shapes),
+            master,
+        })
     }
 
     /// Reads and parses any slide-family part by name (layouts, masters, notes).
@@ -741,6 +784,24 @@ impl<'d> Slide<'d> {
         report.unknown_elements += self.report.unknown_elements;
     }
 
+    /// Gives the frame of a placeholder that has no transform of its own:
+    /// from its layout, else from the layout's master. The layout and
+    /// master are read at the first placeholder asked about.
+    pub(crate) fn build_frame_resolver(&self) -> impl Fn(&Shape) -> Option<Frame> + '_ {
+        let inherited: OnceCell<Option<Rc<InheritedFrames>>> = OnceCell::new();
+        move |shape| {
+            let placeholder = shape.placeholder.as_ref()?;
+            let frames = inherited
+                .get_or_init(|| {
+                    let layout = self.layout_part().ok().flatten()?;
+                    self.doc.fetch_inherited_frames(&layout)
+                })
+                .as_ref()?;
+            match_placeholder(&frames.layout, placeholder, true)
+                .or_else(|| match_placeholder(&frames.master, placeholder, false))
+        }
+    }
+
     /// The text of a chart or diagram frame, when the options ask for it;
     /// unreadable parts are recorded in `report`.
     fn frame_text(
@@ -828,9 +889,10 @@ impl<'d> Slide<'d> {
             return String::new();
         }
         let mut out = String::new();
-        write_content_text(
+        write_slide_text(
             &self.content,
             options,
+            &self.build_frame_resolver(),
             &mut |shape| self.frame_text(shape, options, report),
             &mut out,
         );

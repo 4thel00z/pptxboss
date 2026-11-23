@@ -2,6 +2,7 @@
 //! what it left out.
 
 use crate::model::{Content, Shape, SlideContent, TextBody};
+use crate::order::{sort_geometric_shapes, Frame, ReadingOrder};
 
 /// What goes into extracted text.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +25,8 @@ pub struct TextOptions {
     pub diagrams: bool,
     /// Separator between table cells of one row.
     pub cell_separator: String,
+    /// The order shapes are read in.
+    pub reading_order: ReadingOrder,
 }
 
 impl Default for TextOptions {
@@ -38,6 +41,7 @@ impl Default for TextOptions {
             charts: true,
             diagrams: true,
             cell_separator: "\t".to_string(),
+            reading_order: ReadingOrder::Content,
         }
     }
 }
@@ -48,24 +52,94 @@ impl Default for TextOptions {
 /// text contribute nothing. Graphic frames whose text lives in another
 /// part (charts, diagrams) ask `frames` for it. No text is inherited from
 /// layouts or masters.
+///
+/// With [`ReadingOrder::Geometric`] the shapes are read by position, using
+/// only the transforms the slide itself carries: a placeholder without
+/// its own transform counts as unpositioned. Shapes in one row are joined
+/// by a space when each is a single line of text, and by a newline otherwise.
 pub fn write_content_text(
     content: &SlideContent,
     options: &TextOptions,
     frames: &mut dyn FnMut(&Shape) -> Option<String>,
     out: &mut String,
 ) {
+    write_slide_text(content, options, &|_| None, frames, out);
+}
+
+/// [`write_content_text`] with `inherited` giving the frame of a
+/// placeholder that has no transform of its own.
+pub(crate) fn write_slide_text(
+    content: &SlideContent,
+    options: &TextOptions,
+    inherited: &dyn Fn(&Shape) -> Option<Frame>,
+    frames: &mut dyn FnMut(&Shape) -> Option<String>,
+    out: &mut String,
+) {
+    match options.reading_order {
+        ReadingOrder::Content => write_shapes::<false>(
+            content.walk().map(|shape| (shape, true)),
+            options,
+            frames,
+            out,
+        ),
+        ReadingOrder::Geometric => {
+            let ordered = sort_geometric_shapes(content, inherited, &|shape| {
+                has_text_candidate(shape, options)
+            });
+            write_shapes::<true>(ordered.into_iter(), options, frames, out);
+        }
+    }
+}
+
+/// True when `shape` passes the options' filters and can contribute text.
+fn has_text_candidate(shape: &Shape, options: &TextOptions) -> bool {
+    if is_filtered(shape, options) {
+        return false;
+    }
+    match &shape.content {
+        Content::Text(body) => !body.is_empty() || has_alt_text(shape, options),
+        Content::Table(_) | Content::Chart(_) | Content::Diagram(_) => true,
+        _ => has_alt_text(shape, options),
+    }
+}
+
+fn has_alt_text(shape: &Shape, options: &TextOptions) -> bool {
+    options.alt_text
+        && !matches!(shape.content, Content::Group(..) | Content::Connector)
+        && shape
+            .description
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+}
+
+fn is_filtered(shape: &Shape, options: &TextOptions) -> bool {
+    if shape.hidden && !options.hidden_shapes {
+        return true;
+    }
+    !options.furniture
+        && shape
+            .placeholder
+            .as_ref()
+            .is_some_and(|ph| ph.kind.is_furniture())
+}
+
+/// Writes the shapes one block each. The flag says a shape starts a new
+/// row; with `JOIN` a single-line text shape continues the line of a
+/// single-line text shape before it in the same row.
+fn write_shapes<'a, const JOIN: bool>(
+    shapes: impl Iterator<Item = (&'a Shape, bool)>,
+    options: &TextOptions,
+    frames: &mut dyn FnMut(&Shape) -> Option<String>,
+    out: &mut String,
+) {
     let mut first = true;
-    for shape in content.walk() {
-        if shape.hidden && !options.hidden_shapes {
+    let mut line_before = false;
+    for (shape, starts_row) in shapes {
+        if is_filtered(shape, options) {
             continue;
         }
-        if !options.furniture
-            && shape
-                .placeholder
-                .as_ref()
-                .is_some_and(|ph| ph.kind.is_furniture())
-        {
-            continue;
+        if JOIN && starts_row {
+            line_before = false;
         }
         let start = out.len();
         write_shape_text(shape, options, out);
@@ -80,8 +154,16 @@ pub fn write_content_text(
         if out.len() == start {
             continue;
         }
+        let mut separator = '\n';
+        if JOIN {
+            let line = matches!(shape.content, Content::Text(_)) && !out[start..].contains('\n');
+            if line && line_before {
+                separator = ' ';
+            }
+            line_before = line;
+        }
         if !first {
-            out.insert(start, '\n');
+            out.insert(start, separator);
         }
         first = false;
     }

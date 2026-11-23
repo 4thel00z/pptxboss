@@ -23,6 +23,7 @@ pub mod markdown;
 pub mod mce;
 pub mod model;
 pub mod opc;
+pub mod order;
 pub mod package;
 pub mod pml;
 pub mod ppt;
@@ -40,6 +41,7 @@ pub use document::{Document, DocumentSeed, ImageRef, ObjectRef, Slide, SlideRef,
 pub use error::{Error, Result};
 pub use markdown::MarkdownOptions;
 pub use model::{Content, Paragraph, Run, Shape, SlideContent, TextBody};
+pub use order::ReadingOrder;
 pub use package::{Package, PackageDefects, PackageSeed, Part};
 pub use presentation::{Presentation, Section};
 pub use properties::{AppProperties, CoreProperties};

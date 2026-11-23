@@ -16,9 +16,11 @@ default it stays on the calling thread.
 `slide_texts(...)`, `markdown(...)`, `core_properties()`,
 `app_properties()`, `sections()`, `comment_authors()`, `presentation()`,
 `package()`. Text methods take `notes`, `furniture`, `hidden_shapes`,
-`hidden_slides`, `alt_text`, `comments`, `charts`, `diagrams`; `markdown`
-takes `headings`, `notes`, `comments`, `hidden_slides`, `hidden_shapes`,
-`furniture`, `images`. `extract`, `slide_texts` and `markdown` also take
+`hidden_slides`, `alt_text`, `comments`, `charts`, `diagrams`,
+`reading_order`; `markdown` takes `headings`, `notes`, `comments`,
+`hidden_slides`, `hidden_shapes`, `furniture`, `images`, `reading_order`.
+`reading_order` is `"content"` (the default) or `"geometric"`, as a string
+or as `pptxboss.ReadingOrder`; any other value raises `ValueError`. `extract`, `slide_texts` and `markdown` also take
 `indexes`, a list of zero-based slide indexes (negatives count from the
 end) read in the written order, which is what the CLI's `--slides` uses.
 `text_reporting` returns `(text, warnings)`; `extract` returns
@@ -27,7 +29,7 @@ end) read in the written order, which is what the CLI's `--slides` uses.
 ## `Slide`
 
 `index`, `number`, `part`, `hidden`, `name`, `title`, `warnings`;
-`text(furniture=, hidden_shapes=, alt_text=, charts=, diagrams=)`,
+`text(furniture=, hidden_shapes=, alt_text=, charts=, diagrams=, reading_order=)`,
 `markdown(...)`, `paragraphs()`, `notes()`, `comments()`, `tables()`,
 `shapes()`, `images()`, `image_bytes(image)`, `charts()`, `diagrams()`,
 `embedded_objects()`, `object_bytes(object)`, `hyperlink(rel_id)`,

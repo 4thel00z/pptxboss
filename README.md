@@ -110,6 +110,16 @@ data as rows, diagram nodes one per line, hidden shapes and
 date/footer/slide-number placeholders left out unless asked for. Text is
 never inherited from a layout or master, so empty placeholders stay empty.
 
+Reading order: by default shapes come in the order the slide lists them.
+Some decks are laid out by hand so that this order is not the order a
+person reads, for example a column of numbers listed before the sentences
+beside them. `--reading-order geometric` (Python `reading_order="geometric"`
+or `pptxboss.ReadingOrder.GEOMETRIC`, Rust `ReadingOrder::Geometric`) reads
+by position instead: shapes whose vertical extents overlap form a row, rows
+go top to bottom, shapes in a row left to right, and single-line shapes in
+one row are joined by a space. PowerPoint has no structure tree, so there
+is no third order. Speaker notes stay after the shapes in both.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/4thel00z/pptxboss/main/assets/screenshots/text.png" alt="pptxboss text with headings and notes for two slides" width="760">
 </p>

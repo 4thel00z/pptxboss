@@ -3,13 +3,53 @@
 ## What you get
 
 Shapes in z-order, which ECMA-376 makes both the paint order and the
-reading order (19.3.1.45). Each shape's paragraphs come one per line; a
+reading order (19.3.1.45); see [Reading order](#reading-order) to read by
+position instead. Each shape's paragraphs come one per line; a
 line break inside a paragraph stays a line break; field text (slide
 numbers, dates) is included as cached. Tables give one line per row with
 tab-separated cells, merged-away cells omitted. Groups are descended. Date,
 footer, header and slide-number placeholders are left out by default, as
 are hidden shapes. Text is never inherited from a layout or master, so an
 empty placeholder is empty.
+
+## Reading order
+
+`content` (the default) reads shapes in the order the slide lists them.
+`geometric` reads them by position:
+
+1. Each shape gets a frame on the slide. Shapes in a group are mapped
+   through the group's child offset and extent. A placeholder without its
+   own position takes the one of the matching placeholder on its layout,
+   else on the layout's master. Tables, charts, diagrams and pictures use
+   their frame. Rotation and flips are ignored.
+2. Shapes go into rows from top to bottom. A shape joins the current row
+   when its vertical extent overlaps the row's by at least half of the
+   shorter of the two heights. A tall shape therefore does not merge the
+   rows beside it.
+3. Inside a row, shapes go from left to right.
+4. In a row, a shape that is one line of text continues the line of the
+   single-line shape before it, separated by a space (`01 First sentence.`).
+   Anything else, such as a shape with several paragraphs or a table,
+   starts a new line. In Markdown the same rule joins plain one-line
+   paragraphs and leaves bullets, tables, images and charts as blocks.
+5. A shape with no frame of its own and none to inherit
+   follows the positioned shapes in the order the slide lists it, one line
+   or block each. A coordinate the reader cannot parse counts as 0, and an
+   extent that is missing counts as 0, so a shape is never dropped
+   for a bad frame.
+
+Speaker notes and comments stay after the shapes in both orders. A slide
+with no shapes reads the same in both.
+
+```sh
+pptxboss text --reading-order geometric deck.pptx
+pptxboss markdown --reading-order geometric deck.pptx
+```
+
+```python
+doc.text(reading_order="geometric")
+doc.markdown(reading_order=pptxboss.ReadingOrder.GEOMETRIC)
+```
 
 ## CLI
 
@@ -19,6 +59,7 @@ pptxboss text --headings deck.pptx      # --- slide N --- before each slide
 pptxboss text --notes deck.pptx         # speaker notes after each slide
 pptxboss text --furniture deck.pptx     # include date/footer/slide-number text
 pptxboss text --skip-hidden deck.pptx   # leave out slides marked hidden
+pptxboss text --reading-order geometric deck.pptx   # by position, see below
 pptxboss text --json deck.pptx          # [{"number": 1, "text": "..."}, ...]
 pptxboss text --slides 2-4,7 deck.pptx  # only those slides, in that order
 ```

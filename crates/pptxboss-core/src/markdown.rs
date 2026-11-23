@@ -6,6 +6,7 @@ use crate::chart::ChartData;
 use crate::document::{Document, Slide};
 use crate::model::{Bullet, Content, Paragraph, PlaceholderKind, RunKind, Shape, Table, TextBody};
 use crate::opc::{Relationships, TargetMode};
+use crate::order::{sort_geometric_shapes, ReadingOrder};
 use crate::text::ExtractReport;
 
 /// What goes into the Markdown.
@@ -25,6 +26,8 @@ pub struct MarkdownOptions {
     pub furniture: bool,
     /// Pictures as `![alt](part)` images.
     pub images: bool,
+    /// The order shapes are read in.
+    pub reading_order: ReadingOrder,
 }
 
 impl Default for MarkdownOptions {
@@ -37,6 +40,7 @@ impl Default for MarkdownOptions {
             hidden_shapes: false,
             furniture: false,
             images: true,
+            reading_order: ReadingOrder::Content,
         }
     }
 }
@@ -110,22 +114,29 @@ impl Slide<'_> {
                 .unwrap_or_else(|| format!("Slide {}", self.number()));
             blocks.push(format!("## {}", escape_inline(&title)));
         }
-        for shape in self.content.walk() {
-            if Some(shape.id) == title_shape && options.headings {
-                continue;
-            }
-            if shape.hidden && !options.hidden_shapes {
-                continue;
-            }
-            let furniture = shape
-                .placeholder
-                .as_ref()
-                .is_some_and(|ph| ph.kind.is_furniture());
-            if furniture && !options.furniture {
-                continue;
-            }
-            if let Some(block) = self.shape_markdown(shape, rels.as_deref(), options, report) {
-                blocks.push(block);
+        let heading_shape = title_shape.filter(|_| options.headings);
+        match options.reading_order {
+            ReadingOrder::Content => self.push_shape_blocks::<false>(
+                self.content.walk().map(|shape| (shape, true)),
+                heading_shape,
+                options,
+                rels.as_deref(),
+                report,
+                &mut blocks,
+            ),
+            ReadingOrder::Geometric => {
+                let ordered =
+                    sort_geometric_shapes(&self.content, &self.build_frame_resolver(), &|shape| {
+                        has_block_candidate(shape, heading_shape, options)
+                    });
+                self.push_shape_blocks::<true>(
+                    ordered.into_iter(),
+                    heading_shape,
+                    options,
+                    rels.as_deref(),
+                    report,
+                    &mut blocks,
+                );
             }
         }
         if options.notes {
@@ -167,6 +178,43 @@ impl Slide<'_> {
             }
         }
         blocks.join("\n\n")
+    }
+
+    /// Appends one block per shape. The flag says a shape starts a new row;
+    /// with `JOIN` a single-line paragraph continues the paragraph of a
+    /// single-line paragraph before it in the same row.
+    fn push_shape_blocks<'s, const JOIN: bool>(
+        &self,
+        shapes: impl Iterator<Item = (&'s Shape, bool)>,
+        heading_shape: Option<u32>,
+        options: &MarkdownOptions,
+        rels: Option<&Relationships>,
+        report: &mut ExtractReport,
+        blocks: &mut Vec<String>,
+    ) {
+        let mut line_before = false;
+        for (shape, starts_row) in shapes {
+            if Some(shape.id) == heading_shape || is_filtered(shape, options) {
+                continue;
+            }
+            if JOIN && starts_row {
+                line_before = false;
+            }
+            let Some(block) = self.shape_markdown(shape, rels, options, report) else {
+                continue;
+            };
+            if JOIN {
+                let line = is_paragraph_line(shape, &block);
+                let joined = line && line_before;
+                line_before = line;
+                if let (true, Some(last)) = (joined, blocks.last_mut()) {
+                    last.push(' ');
+                    last.push_str(&block);
+                    continue;
+                }
+            }
+            blocks.push(block);
+        }
     }
 
     fn shape_markdown(
@@ -278,6 +326,47 @@ impl Slide<'_> {
             }
         }
     }
+}
+
+fn is_filtered(shape: &Shape, options: &MarkdownOptions) -> bool {
+    if shape.hidden && !options.hidden_shapes {
+        return true;
+    }
+    !options.furniture
+        && shape
+            .placeholder
+            .as_ref()
+            .is_some_and(|ph| ph.kind.is_furniture())
+}
+
+/// True when `shape` is not skipped and can produce a block.
+fn has_block_candidate(
+    shape: &Shape,
+    heading_shape: Option<u32>,
+    options: &MarkdownOptions,
+) -> bool {
+    if Some(shape.id) == heading_shape || is_filtered(shape, options) {
+        return false;
+    }
+    match &shape.content {
+        Content::Text(body) => !body.is_empty(),
+        Content::Group(..) | Content::Connector => false,
+        Content::ContentPart(_) | Content::UnknownGraphic(_) => shape
+            .description
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty()),
+        _ => true,
+    }
+}
+
+/// True for the block of a text shape that is one plain line: no list
+/// marker and no line break.
+fn is_paragraph_line(shape: &Shape, block: &str) -> bool {
+    let item = block.trim_start();
+    matches!(shape.content, Content::Text(_))
+        && !block.contains('\n')
+        && !item.starts_with("- ")
+        && !item.starts_with("1. ")
 }
 
 /// Paragraphs as bullets or plain paragraphs. Paragraphs that inherit
